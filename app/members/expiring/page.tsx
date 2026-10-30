@@ -1,18 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Search,
   Clock,
   CalendarDays,
-  Phone,
-  Mail,
   Eye,
   X,
   MessageCircle,
   AlertTriangle,
+  Users,
+  RefreshCw,
 } from "lucide-react";
 
 type Member = {
@@ -73,10 +73,7 @@ const members: Member[] = [
   },
 ];
 
-function getDaysRemaining(validUntil: string) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
+function getDaysRemaining(validUntil: string, today: Date) {
   const expiry = new Date(`${validUntil}T00:00:00`);
 
   return Math.ceil((expiry.getTime() - today.getTime()) / 86400000);
@@ -92,6 +89,7 @@ function formatDate(date: string) {
 
 function getWhatsAppLink(phone: string, name: string) {
   const number = phone.replace(/\D/g, "");
+
   const message = `Halo ${name}, kami ingin mengingatkan bahwa masa membership Anda akan segera berakhir. Silakan hubungi kami untuk informasi perpanjangan.`;
 
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
@@ -101,11 +99,23 @@ export default function ExpiringMembersPage() {
   const [search, setSearch] = useState("");
   const [period, setPeriod] = useState(30);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [today, setToday] = useState<Date | null>(null);
 
+  // Read current date only after the component mounts in the browser.
+  useEffect(() => {
+    const currentDate = new Date();
+    currentDate.setHours(0, 0, 0, 0);
+    setToday(currentDate);
+  }, []);
+
+  // Filter and sort expiring members.
   const expiringMembers = useMemo(() => {
+    if (!today) return [];
+
     return members
       .filter((member) => {
-        const days = getDaysRemaining(member.validUntil);
+        const days = getDaysRemaining(member.validUntil, today);
+
         return days >= 0 && days <= period;
       })
       .filter((member) => {
@@ -117,23 +127,30 @@ export default function ExpiringMembersPage() {
       })
       .sort(
         (a, b) =>
-          getDaysRemaining(a.validUntil) - getDaysRemaining(b.validUntil),
+          getDaysRemaining(a.validUntil, today) -
+          getDaysRemaining(b.validUntil, today),
       );
-  }, [search, period]);
+  }, [search, period, today]);
 
-  const allExpiringCount = members.filter((member) => {
-    const days = getDaysRemaining(member.validUntil);
-    return days >= 0 && days <= 30;
-  }).length;
+  // Statistics.
+  const allExpiringCount = today
+    ? members.filter((member) => {
+        const days = getDaysRemaining(member.validUntil, today);
+        return days >= 0 && days <= 30;
+      }).length
+    : 0;
 
-  const urgentCount = members.filter((member) => {
-    const days = getDaysRemaining(member.validUntil);
-    return days >= 0 && days <= 7;
-  }).length;
+  const urgentCount = today
+    ? members.filter((member) => {
+        const days = getDaysRemaining(member.validUntil, today);
+        return days >= 0 && days <= 7;
+      }).length
+    : 0;
 
   return (
     <div className="min-h-screen bg-[#151515] p-6 text-white md:p-10">
       <div className="mx-auto max-w-7xl">
+        {/* Back Navigation */}
         <Link
           href="/"
           className="mb-8 inline-flex items-center gap-2 text-sm text-gray-400 transition hover:text-[#14E1E6]"
@@ -158,6 +175,7 @@ export default function ExpiringMembersPage() {
 
           <div className="rounded-xl border border-yellow-400/20 bg-yellow-400/5 px-4 py-3">
             <p className="text-xs text-gray-500">Current warning period</p>
+
             <p className="mt-1 text-lg font-bold text-yellow-400">30 Days</p>
           </div>
         </div>
@@ -167,11 +185,14 @@ export default function ExpiringMembersPage() {
           <div className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5">
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-400">Expiring Within 30 Days</p>
+
               <CalendarDays className="text-yellow-400" size={21} />
             </div>
+
             <h2 className="mt-4 text-3xl font-bold text-yellow-400">
-              {allExpiringCount}
+              {today ? allExpiringCount : "-"}
             </h2>
+
             <p className="mt-2 text-xs text-gray-500">
               Members approaching expiration
             </p>
@@ -180,11 +201,14 @@ export default function ExpiringMembersPage() {
           <div className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5">
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-400">Urgent — Within 7 Days</p>
+
               <AlertTriangle className="text-red-400" size={21} />
             </div>
+
             <h2 className="mt-4 text-3xl font-bold text-red-400">
-              {urgentCount}
+              {today ? urgentCount : "-"}
             </h2>
+
             <p className="mt-2 text-xs text-gray-500">
               Members requiring immediate follow-up
             </p>
@@ -222,6 +246,7 @@ export default function ExpiringMembersPage() {
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#1D1D1D]">
           <div className="border-b border-white/10 p-5">
             <h2 className="font-semibold">Upcoming Expirations</h2>
+
             <p className="mt-1 text-xs text-gray-500">
               Showing {expiringMembers.length} members
             </p>
@@ -242,7 +267,8 @@ export default function ExpiringMembersPage() {
 
               <tbody>
                 {expiringMembers.map((member) => {
-                  const days = getDaysRemaining(member.validUntil);
+                  const days = getDaysRemaining(member.validUntil, today!);
+
                   const urgent = days <= 7;
 
                   return (
@@ -260,9 +286,11 @@ export default function ExpiringMembersPage() {
                             <p className="font-medium text-white">
                               {member.name}
                             </p>
+
                             <p className="mt-1 text-xs text-gray-500">
                               {member.email}
                             </p>
+
                             <p className="mt-1 text-xs text-gray-600">
                               {member.id}
                             </p>
@@ -289,7 +317,7 @@ export default function ExpiringMembersPage() {
                       </td>
 
                       <td className="px-5 py-4">
-                        <span className="rounded-full bg-yellow-400/10 px-3 py-1.5 text-xs font-medium text-yellow-400">
+                        <span className="whitespace-nowrap rounded-full bg-yellow-400/10 px-3 py-1.5 text-xs font-medium text-yellow-400">
                           Expiring Soon
                         </span>
                       </td>
@@ -299,7 +327,7 @@ export default function ExpiringMembersPage() {
                           <button
                             title="View member"
                             onClick={() => setSelectedMember(member)}
-                            className="rounded-lg border border-white/10 p-2 text-gray-400 hover:text-[#14E1E6]"
+                            className="rounded-lg border border-white/10 p-2 text-gray-400 transition hover:text-[#14E1E6]"
                           >
                             <Eye size={16} />
                           </button>
@@ -309,7 +337,7 @@ export default function ExpiringMembersPage() {
                             target="_blank"
                             rel="noopener noreferrer"
                             title="Contact via WhatsApp"
-                            className="rounded-lg border border-green-500/20 p-2 text-green-400 hover:bg-green-500/10"
+                            className="rounded-lg border border-green-500/20 p-2 text-green-400 transition hover:bg-green-500/10"
                           >
                             <MessageCircle size={16} />
                           </a>
@@ -319,15 +347,31 @@ export default function ExpiringMembersPage() {
                   );
                 })}
 
-                {expiringMembers.length === 0 && (
+                {today && expiringMembers.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-5 py-16 text-center">
-                      <Clock size={32} className="mx-auto mb-3 text-gray-600" />
+                      <Users size={32} className="mx-auto mb-3 text-gray-600" />
+
                       <p className="font-medium text-gray-300">
                         No expiring members found
                       </p>
+
                       <p className="mt-1 text-xs text-gray-500">
                         Try changing the period or search keyword.
+                      </p>
+                    </td>
+                  </tr>
+                )}
+
+                {!today && (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-16 text-center">
+                      <RefreshCw
+                        size={24}
+                        className="mx-auto mb-3 animate-spin text-[#14E1E6]"
+                      />
+                      <p className="text-sm text-gray-400">
+                        Loading membership data...
                       </p>
                     </td>
                   </tr>
@@ -337,8 +381,8 @@ export default function ExpiringMembersPage() {
           </div>
         </div>
 
-        {/* Detail Modal */}
-        {selectedMember && (
+        {/* Member Detail Modal */}
+        {selectedMember && today && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
             onClick={() => setSelectedMember(null)}
@@ -349,6 +393,7 @@ export default function ExpiringMembersPage() {
             >
               <div className="mb-6 flex items-center justify-between">
                 <h2 className="text-lg font-semibold">Member Details</h2>
+
                 <button
                   onClick={() => setSelectedMember(null)}
                   className="text-gray-400 hover:text-white"
@@ -368,7 +413,7 @@ export default function ExpiringMembersPage() {
                   ["Valid Until", formatDate(selectedMember.validUntil)],
                   [
                     "Remaining",
-                    `${getDaysRemaining(selectedMember.validUntil)} days`,
+                    `${getDaysRemaining(selectedMember.validUntil, today)} days`,
                   ],
                 ].map(([label, value]) => (
                   <div
@@ -376,6 +421,7 @@ export default function ExpiringMembersPage() {
                     className="flex justify-between gap-4 border-b border-white/5 pb-3 text-sm"
                   >
                     <span className="text-gray-500">{label}</span>
+
                     <span className="text-right font-medium text-white">
                       {value}
                     </span>
@@ -390,7 +436,7 @@ export default function ExpiringMembersPage() {
                 )}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-green-500 py-3 text-sm font-semibold text-white hover:bg-green-600"
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-green-500 py-3 text-sm font-semibold text-white transition hover:bg-green-600"
               >
                 <MessageCircle size={18} />
                 Contact via WhatsApp
