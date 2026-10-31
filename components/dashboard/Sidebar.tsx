@@ -9,6 +9,7 @@ import {
   Settings,
   LogOut,
   Crown,
+  UserRoundPlus,
 } from "lucide-react";
 
 import { usePathname } from "next/navigation";
@@ -16,6 +17,7 @@ import { usePathname } from "next/navigation";
 const menus = [
   { label: "Overview", icon: LayoutDashboard, href: "/" },
   { label: "All Members", icon: Users, href: "/members" },
+  { label: "Prospects", icon: UserRoundPlus, href: "/prospects" },
   { label: "Expiring Members", icon: Clock, href: "/members/expiring" },
   { label: "Expired Members", icon: UserX, href: "/members/expired" },
   { label: "Settings", icon: Settings, href: "/settings" },
