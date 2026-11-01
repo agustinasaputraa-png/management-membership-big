@@ -17,6 +17,7 @@ import {
   RefreshCw,
   LoaderCircle,
   AlertCircle,
+  MessageCircle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
