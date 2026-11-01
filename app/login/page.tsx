@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   LockKeyhole,
   Mail,
@@ -10,50 +11,73 @@ import {
   ShieldCheck,
   Users,
   AlertCircle,
-  CheckCircle2,
+  LoaderCircle,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     setError("");
-    setMessage("");
 
-    const normalizedEmail = email.trim();
+    const normalizedEmail = email.trim().toLowerCase();
 
-    if (!normalizedEmail || !password.trim()) {
-      setError("Please enter your email and password.");
+    if (!normalizedEmail || !password) {
+      setError("Masukkan email dan password.");
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setError("Please enter a valid email address.");
-      return;
-    }
+    setLoading(true);
 
-    // UI only. Supabase authentication will be connected later.
-    setMessage(
-      "Login interface is ready. Authentication is not connected yet.",
-    );
+    try {
+      const { data, error: loginError } =
+        await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+
+      if (loginError) {
+        console.error("LOGIN ERROR:", loginError);
+
+        setError(
+          loginError.message === "Invalid login credentials"
+            ? "Email atau password salah."
+            : loginError.message,
+        );
+
+        return;
+      }
+
+      if (!data.session) {
+        setError("Session login tidak berhasil dibuat.");
+        return;
+      }
+
+      router.replace("/");
+      router.refresh();
+    } catch (err) {
+      console.error("LOGIN ERROR:", err);
+      setError("Terjadi kesalahan. Silakan coba kembali.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#151515] px-4 py-10 text-white">
-      {/* Background Decorations */}
       <div className="pointer-events-none absolute -left-40 -top-40 h-96 w-96 rounded-full bg-[#14E1E6]/5 blur-[100px]" />
 
       <div className="pointer-events-none absolute -bottom-40 -right-40 h-96 w-96 rounded-full bg-[#14E1E6]/5 blur-[100px]" />
 
-      {/* Login Container */}
       <div className="relative z-10 w-full max-w-md rounded-3xl border border-white/10 bg-[#1b1b1b] p-6 shadow-2xl sm:p-10">
-        {/* Logo */}
         <div className="mb-10 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#14E1E6] text-black">
             <Users size={25} strokeWidth={2.5} />
@@ -68,7 +92,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Heading */}
         <div className="mb-8">
           <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#14E1E6]/20 bg-[#14E1E6]/10 text-[#14E1E6]">
             <LockKeyhole size={25} />
@@ -85,9 +108,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Email */}
           <div>
             <label
               htmlFor="email"
@@ -105,20 +126,19 @@ export default function LoginPage() {
               <input
                 id="email"
                 type="email"
+                required
                 autoComplete="username"
                 placeholder="admin@example.com"
                 value={email}
                 onChange={(event) => {
                   setEmail(event.target.value);
                   setError("");
-                  setMessage("");
                 }}
                 className="w-full rounded-xl border border-white/10 bg-[#151515] py-3.5 pl-12 pr-4 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-[#14E1E6] focus:ring-2 focus:ring-[#14E1E6]/10"
               />
             </div>
           </div>
 
-          {/* Password */}
           <div>
             <label
               htmlFor="password"
@@ -136,13 +156,13 @@ export default function LoginPage() {
               <input
                 id="password"
                 type={showPassword ? "text" : "password"}
+                required
                 autoComplete="current-password"
                 placeholder="Enter your password"
                 value={password}
                 onChange={(event) => {
                   setPassword(event.target.value);
                   setError("");
-                  setMessage("");
                 }}
                 className="w-full rounded-xl border border-white/10 bg-[#151515] py-3.5 pl-12 pr-12 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-[#14E1E6] focus:ring-2 focus:ring-[#14E1E6]/10"
               />
@@ -158,7 +178,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Error Message */}
           {error && (
             <div
               role="alert"
@@ -169,31 +188,28 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Success Message */}
-          {message && (
-            <div
-              role="status"
-              className="flex items-start gap-2 rounded-xl border border-[#14E1E6]/20 bg-[#14E1E6]/5 p-3 text-sm text-[#14E1E6]"
-            >
-              <CheckCircle2 size={17} className="mt-0.5 shrink-0" />
-              <span>{message}</span>
-            </div>
-          )}
-
-          {/* Submit Button */}
           <button
             type="submit"
-            className="group flex w-full items-center justify-center gap-2 rounded-xl bg-[#14E1E6] py-3.5 text-sm font-bold text-black transition hover:bg-[#0fcbd0] active:scale-[0.99]"
+            disabled={loading}
+            className="group flex w-full items-center justify-center gap-2 rounded-xl bg-[#14E1E6] py-3.5 text-sm font-bold text-black transition hover:bg-[#0fcbd0] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Sign In
-            <ArrowRight
-              size={18}
-              className="transition-transform group-hover:translate-x-1"
-            />
+            {loading ? (
+              <>
+                <LoaderCircle size={18} className="animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              <>
+                Sign In
+                <ArrowRight
+                  size={18}
+                  className="transition-transform group-hover:translate-x-1"
+                />
+              </>
+            )}
           </button>
         </form>
 
-        {/* Security Footer */}
         <div className="my-8 flex items-center gap-4">
           <div className="h-px flex-1 bg-white/10" />
 

@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Search,
   Plus,
@@ -12,19 +11,17 @@ import {
   Pencil,
   X,
   CalendarDays,
-  MessageCircle,
+  RefreshCw,
+  LoaderCircle,
+  AlertCircle,
 } from "lucide-react";
 
 import Sidebar from "@/components/dashboard/Sidebar";
 import Header from "@/components/dashboard/Header";
 import WhatsAppButton from "@/components/prospects/WhatsAppButton";
+import { supabase } from "@/lib/supabase";
 
-type ProspectStatus =
-  | "NEW"
-  | "FOLLOW_UP"
-  | "INTERESTED"
-  | "CONVERTED"
-  | "LOST";
+type ProspectStatus = "NEW" | "FOLLOW_UP" | "INTERESTED" | "CONVERTED" | "LOST";
 
 type Prospect = {
   id: string;
@@ -38,7 +35,17 @@ type Prospect = {
   createdAt: string;
 };
 
-const STORAGE_KEY = "membership_prospects";
+type ProspectRow = {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  interest: string | null;
+  notes: string | null;
+  status: ProspectStatus;
+  next_follow_up: string | null;
+  created_at: string;
+};
 
 const statusOptions: {
   value: ProspectStatus;
@@ -61,41 +68,22 @@ const emptyForm = {
   nextFollowUp: "",
 };
 
-const initialProspects: Prospect[] = [
-  {
-    id: "demo-1",
-    name: "Andi Pratama",
-    phone: "081234567890",
-    email: "andi@example.com",
-    interest: "Membership Gold",
-    notes: "Tertarik dengan paket Gold.",
-    status: "FOLLOW_UP",
-    nextFollowUp: "2026-10-31",
-    createdAt: "2026-10-28",
-  },
-  {
-    id: "demo-2",
-    name: "Sarah Wijaya",
-    phone: "081398765432",
-    email: "sarah@example.com",
-    interest: "Membership Silver",
-    notes: "Meminta informasi harga.",
-    status: "INTERESTED",
-    nextFollowUp: "2026-11-02",
-    createdAt: "2026-10-29",
-  },
-  {
-    id: "demo-3",
-    name: "Budi Santoso",
-    phone: "085712345678",
-    email: "budi@example.com",
-    interest: "Membership Gold",
-    notes: "Belum berhasil dihubungi.",
-    status: "NEW",
-    nextFollowUp: "2026-11-03",
-    createdAt: "2026-10-30",
-  },
-];
+const inputClass =
+  "w-full rounded-xl border border-white/10 bg-[#252525] px-4 py-3 text-sm text-white outline-none focus:border-[#14E1E6]";
+
+function mapProspect(row: ProspectRow): Prospect {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    email: row.email ?? "",
+    interest: row.interest ?? "",
+    notes: row.notes ?? "",
+    status: row.status,
+    nextFollowUp: row.next_follow_up ?? "",
+    createdAt: row.created_at,
+  };
+}
 
 function getStatusStyle(status: ProspectStatus) {
   switch (status) {
@@ -109,11 +97,9 @@ function getStatusStyle(status: ProspectStatus) {
       return "bg-green-400/10 text-green-400";
     case "LOST":
       return "bg-red-400/10 text-red-400";
+    default:
+      return "bg-gray-400/10 text-gray-400";
   }
-}
-
-function getStatusLabel(status: ProspectStatus) {
-  return statusOptions.find((item) => item.value === status)?.label ?? status;
 }
 
 function formatDate(date: string) {
@@ -130,46 +116,68 @@ export default function ProspectsPage() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
+
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [isLoaded, setIsLoaded] = useState(false);
 
-  useEffect(() => {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  // GET DATA DARI SUPABASE
+  const fetchProspects = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
 
-      if (saved) {
-        setProspects(JSON.parse(saved));
-      } else {
-        setProspects(initialProspects);
-        localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify(initialProspects),
-        );
+      if (authError || !user) {
+        window.location.replace("/login");
+        return;
       }
-    } catch (error) {
-      console.error("Gagal membaca data prospek:", error);
-      setProspects(initialProspects);
-    }
 
-    setIsLoaded(true);
+      const { data, error: fetchError } = await supabase
+        .from("prospects")
+        .select(
+          "id, name, phone, email, interest, notes, status, next_follow_up, created_at",
+        )
+        .order("created_at", { ascending: false });
+
+      if (fetchError) {
+        console.error("FETCH PROSPECTS ERROR:", fetchError);
+        setError(fetchError.message);
+        return;
+      }
+
+      setProspects(((data ?? []) as ProspectRow[]).map(mapProspect));
+    } catch (err) {
+      console.error("FETCH PROSPECTS ERROR:", err);
+      setError("Gagal mengambil data prospek dari database.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    void fetchProspects();
+  }, [fetchProspects]);
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(prospects));
-  }, [prospects, isLoaded]);
-
+  // SEARCH DAN FILTER
   const filteredProspects = useMemo(() => {
     return prospects.filter((prospect) => {
-      const keyword = search.toLowerCase();
+      const keyword = search.toLowerCase().trim();
 
       const matchesSearch =
         prospect.name.toLowerCase().includes(keyword) ||
         prospect.phone.includes(search) ||
-        prospect.email.toLowerCase().includes(keyword);
+        prospect.email.toLowerCase().includes(keyword) ||
+        prospect.interest.toLowerCase().includes(keyword);
 
       const matchesStatus =
         filterStatus === "ALL" || prospect.status === filterStatus;
@@ -178,22 +186,31 @@ export default function ProspectsPage() {
     });
   }, [prospects, search, filterStatus]);
 
+  // STATISTIK
   const totalProspects = prospects.length;
+
   const needFollowUp = prospects.filter(
     (item) => item.status === "FOLLOW_UP",
   ).length;
+
   const interested = prospects.filter(
     (item) => item.status === "INTERESTED",
+  ).length;
+
+  const converted = prospects.filter(
+    (item) => item.status === "CONVERTED",
   ).length;
 
   function openAddModal() {
     setEditingId(null);
     setForm(emptyForm);
+    setError("");
     setShowModal(true);
   }
 
   function openEditModal(prospect: Prospect) {
     setEditingId(prospect.id);
+
     setForm({
       name: prospect.name,
       phone: prospect.phone,
@@ -203,70 +220,176 @@ export default function ProspectsPage() {
       status: prospect.status,
       nextFollowUp: prospect.nextFollowUp,
     });
+
+    setError("");
     setShowModal(true);
   }
 
   function closeModal() {
+    if (saving) return;
+
     setShowModal(false);
     setEditingId(null);
     setForm(emptyForm);
+    setError("");
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  // CREATE DAN UPDATE
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (saving) return;
+
+    setError("");
+    setMessage("");
 
     const cleanPhone = form.phone.replace(/\D/g, "");
 
-    if (cleanPhone.length < 9 || cleanPhone.length > 15) {
-      alert("Masukkan nomor telepon yang valid.");
+    if (!form.name.trim()) {
+      setError("Nama prospek wajib diisi.");
       return;
     }
 
-    const now = new Date().toISOString().slice(0, 10);
-
-    if (editingId) {
-      setProspects((previous) =>
-        previous.map((item) =>
-          item.id === editingId
-            ? {
-                ...item,
-                ...form,
-                phone: form.phone.trim(),
-              }
-            : item,
-        ),
-      );
-    } else {
-      const newProspect: Prospect = {
-        id: crypto.randomUUID(),
-        ...form,
-        phone: form.phone.trim(),
-        createdAt: now,
-      };
-
-      setProspects((previous) => [newProspect, ...previous]);
+    if (cleanPhone.length < 9 || cleanPhone.length > 15) {
+      setError("Masukkan nomor telepon yang valid.");
+      return;
     }
 
-    closeModal();
+    setSaving(true);
+
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        window.location.replace("/login");
+        return;
+      }
+
+      const payload = {
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        email: form.email.trim().toLowerCase() || null,
+        interest: form.interest.trim() || null,
+        notes: form.notes.trim() || null,
+        status: form.status,
+        next_follow_up: form.nextFollowUp || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (editingId) {
+        const { data: updatedProspect, error: updateError } = await supabase
+          .from("prospects")
+          .update(payload)
+          .eq("id", editingId)
+          .select("id")
+          .maybeSingle();
+
+        if (updateError) {
+          console.error("UPDATE PROSPECT ERROR:", updateError);
+          setError(updateError.message);
+          return;
+        }
+
+        if (!updatedProspect) {
+          setError(
+            "Prospek tidak ditemukan atau kamu tidak memiliki izin untuk mengubah data ini.",
+          );
+          return;
+        }
+
+        setMessage("Data prospek berhasil diperbarui.");
+      } else {
+        const { error: insertError } = await supabase
+          .from("prospects")
+          .insert([payload]);
+
+        if (insertError) {
+          console.error("INSERT PROSPECT ERROR:", insertError);
+          setError(insertError.message);
+          return;
+        }
+
+        setMessage("Prospek berhasil ditambahkan.");
+      }
+
+      setShowModal(false);
+      setEditingId(null);
+      setForm(emptyForm);
+
+      await fetchProspects();
+    } catch (err) {
+      console.error("SAVE PROSPECT ERROR:", err);
+      setError("Terjadi kesalahan saat menyimpan prospek.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function deleteProspect(id: string) {
+  // DELETE
+  async function deleteProspect(id: string) {
     const confirmed = window.confirm(
       "Apakah kamu yakin ingin menghapus prospek ini?",
     );
 
     if (!confirmed) return;
 
-    setProspects((previous) =>
-      previous.filter((item) => item.id !== id),
-    );
+    setError("");
+    setMessage("");
+
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        window.location.replace("/login");
+        return;
+      }
+
+      const { error: deleteError } = await supabase
+        .from("prospects")
+        .delete()
+        .eq("id", id);
+
+      if (deleteError) {
+        console.error("DELETE PROSPECT ERROR:", deleteError);
+        setError(deleteError.message);
+        return;
+      }
+
+      setMessage("Prospek berhasil dihapus.");
+      await fetchProspects();
+    } catch (err) {
+      console.error("DELETE PROSPECT ERROR:", err);
+      setError("Gagal menghapus prospek.");
+    }
   }
 
-  function updateStatus(id: string, status: ProspectStatus) {
+  // UPDATE STATUS LANGSUNG DARI TABEL
+  async function updateStatus(id: string, status: ProspectStatus) {
+    setError("");
+    setMessage("");
+
+    const { error: updateError } = await supabase
+      .from("prospects")
+      .update({
+        status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (updateError) {
+      console.error("UPDATE STATUS ERROR:", updateError);
+      setError(updateError.message);
+      return;
+    }
+
     setProspects((previous) =>
-      previous.map((item) =>
-        item.id === id ? { ...item, status } : item,
-      ),
+      previous.map((item) => (item.id === id ? { ...item, status } : item)),
     );
   }
 
@@ -297,44 +420,72 @@ export default function ProspectsPage() {
           </div>
 
           {/* STATISTICS */}
-          <section className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400">Total Prospects</p>
-                <Users className="text-gray-400" />
-              </div>
-              <p className="mt-4 text-3xl font-bold">{totalProspects}</p>
-              <p className="mt-1 text-xs text-gray-500">
-                All potential members
-              </p>
-            </div>
+          <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              {
+                label: "Total Prospects",
+                value: totalProspects,
+                icon: Users,
+                color: "text-white",
+              },
+              {
+                label: "Need Follow-up",
+                value: needFollowUp,
+                icon: Clock,
+                color: "text-yellow-400",
+              },
+              {
+                label: "Interested",
+                value: interested,
+                icon: UserCheck,
+                color: "text-[#14E1E6]",
+              },
+              {
+                label: "Converted",
+                value: converted,
+                icon: UserCheck,
+                color: "text-green-400",
+              },
+            ].map((item) => {
+              const Icon = item.icon;
 
-            <div className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400">Need Follow-up</p>
-                <Clock className="text-yellow-400" />
-              </div>
-              <p className="mt-4 text-3xl font-bold text-yellow-400">
-                {needFollowUp}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                Waiting for follow-up
-              </p>
-            </div>
+              return (
+                <div
+                  key={item.label}
+                  className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-400">{item.label}</p>
+                    <Icon className={item.color} />
+                  </div>
 
-            <div className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400">Interested</p>
-                <UserCheck className="text-[#14E1E6]" />
-              </div>
-              <p className="mt-4 text-3xl font-bold text-[#14E1E6]">
-                {interested}
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                Potential membership
-              </p>
-            </div>
+                  <p className={`mt-4 text-3xl font-bold ${item.color}`}>
+                    {item.value}
+                  </p>
+                </div>
+              );
+            })}
           </section>
+
+          {/* FEEDBACK */}
+          {error && (
+            <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
+              <AlertCircle size={18} className="mt-0.5 shrink-0" />
+              <span>{error}</span>
+              <button onClick={() => setError("")} className="ml-auto">
+                <X size={17} />
+              </button>
+            </div>
+          )}
+
+          {message && (
+            <div className="flex items-center justify-between rounded-xl border border-[#14E1E6]/20 bg-[#14E1E6]/5 p-4 text-sm text-[#14E1E6]">
+              {message}
+              <button onClick={() => setMessage("")}>
+                <X size={17} />
+              </button>
+            </div>
+          )}
 
           {/* TABLE */}
           <section className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-6">
@@ -342,7 +493,8 @@ export default function ProspectsPage() {
               <div>
                 <h2 className="font-semibold">All Prospects</h2>
                 <p className="mt-1 text-xs text-gray-500">
-                  Manage your potential members.
+                  Showing {filteredProspects.length} of {totalProspects}{" "}
+                  prospects
                 </p>
               </div>
 
@@ -369,6 +521,18 @@ export default function ProspectsPage() {
                     </option>
                   ))}
                 </select>
+
+                <button
+                  onClick={() => void fetchProspects()}
+                  disabled={loading}
+                  title="Refresh data"
+                  className="flex items-center justify-center rounded-xl border border-white/10 px-4 py-3 text-gray-400 hover:border-[#14E1E6] hover:text-[#14E1E6] disabled:opacity-50"
+                >
+                  <RefreshCw
+                    size={17}
+                    className={loading ? "animate-spin" : ""}
+                  />
+                </button>
               </div>
             </div>
 
@@ -386,103 +550,114 @@ export default function ProspectsPage() {
                 </thead>
 
                 <tbody>
-                  {filteredProspects.map((prospect) => (
-                    <tr
-                      key={prospect.id}
-                      className="border-b border-white/5 last:border-0"
-                    >
-                      <td className="py-5">
-                        <p className="text-sm font-semibold">
-                          {prospect.name}
-                        </p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {prospect.phone}
-                        </p>
-                        <p className="mt-1 text-xs text-gray-600">
-                          {prospect.email || "-"}
-                        </p>
-                      </td>
-
-                      <td className="py-5 text-sm text-gray-300">
-                        {prospect.interest || "-"}
-                      </td>
-
-                      <td className="py-5">
-                        <div className="flex items-center gap-2 text-sm text-gray-400">
-                          <CalendarDays size={15} />
-                          {formatDate(prospect.nextFollowUp)}
-                        </div>
-                      </td>
-
-                      <td className="py-5">
-                        <select
-                          value={prospect.status}
-                          onChange={(event) =>
-                            updateStatus(
-                              prospect.id,
-                              event.target.value as ProspectStatus,
-                            )
-                          }
-                          className={`rounded-lg border-0 px-3 py-2 text-xs font-medium outline-none ${getStatusStyle(prospect.status)} bg-[#252525]`}
-                        >
-                          {statusOptions.map((status) => (
-                            <option
-                              key={status.value}
-                              value={status.value}
-                              className="bg-[#252525] text-white"
-                            >
-                              {status.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-
-                      <td className="py-5">
-                        <WhatsAppButton
-                          phone={prospect.phone}
-                          name={prospect.name}
-                          interest={prospect.interest}
-                        />
-                      </td>
-
-                      <td className="py-5">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => openEditModal(prospect)}
-                            title="Edit prospect"
-                            className="rounded-lg border border-white/10 p-2 text-gray-400 transition hover:bg-white/5 hover:text-white"
-                          >
-                            <Pencil size={16} />
-                          </button>
-
-                          <button
-                            onClick={() => deleteProspect(prospect.id)}
-                            title="Delete prospect"
-                            className="rounded-lg border border-white/10 p-2 text-gray-400 transition hover:bg-red-500/10 hover:text-red-400"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-
-                  {filteredProspects.length === 0 && (
+                  {loading ? (
                     <tr>
                       <td
                         colSpan={6}
                         className="py-12 text-center text-sm text-gray-500"
                       >
-                        No prospects found.
+                        <LoaderCircle
+                          size={24}
+                          className="mx-auto mb-3 animate-spin"
+                        />
+                        Loading prospects from Supabase...
                       </td>
                     </tr>
+                  ) : filteredProspects.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="py-12 text-center text-sm text-gray-500"
+                      >
+                        {prospects.length === 0
+                          ? "Belum ada data prospek. Klik Add Prospect untuk menambahkan data."
+                          : "No prospects found."}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredProspects.map((prospect) => (
+                      <tr
+                        key={prospect.id}
+                        className="border-b border-white/5 last:border-0"
+                      >
+                        <td className="py-5">
+                          <p className="text-sm font-semibold">
+                            {prospect.name}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {prospect.phone}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-600">
+                            {prospect.email || "-"}
+                          </p>
+                        </td>
+
+                        <td className="py-5 text-sm text-gray-300">
+                          {prospect.interest || "-"}
+                        </td>
+
+                        <td className="py-5">
+                          <div className="flex items-center gap-2 text-sm text-gray-400">
+                            <CalendarDays size={15} />
+                            {formatDate(prospect.nextFollowUp)}
+                          </div>
+                        </td>
+
+                        <td className="py-5">
+                          <select
+                            value={prospect.status}
+                            onChange={(event) =>
+                              void updateStatus(
+                                prospect.id,
+                                event.target.value as ProspectStatus,
+                              )
+                            }
+                            className={`rounded-lg border-0 px-3 py-2 text-xs font-medium outline-none ${getStatusStyle(prospect.status)} bg-[#252525]`}
+                          >
+                            {statusOptions.map((status) => (
+                              <option
+                                key={status.value}
+                                value={status.value}
+                                className="bg-[#252525] text-white"
+                              >
+                                {status.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        <td className="py-5">
+                          <WhatsAppButton
+                            phone={prospect.phone}
+                            name={prospect.name}
+                            interest={prospect.interest}
+                          />
+                        </td>
+
+                        <td className="py-5">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => openEditModal(prospect)}
+                              title="Edit prospect"
+                              className="rounded-lg border border-white/10 p-2 text-gray-400 transition hover:bg-white/5 hover:text-white"
+                            >
+                              <Pencil size={16} />
+                            </button>
+
+                            <button
+                              onClick={() => void deleteProspect(prospect.id)}
+                              title="Delete prospect"
+                              className="rounded-lg border border-white/10 p-2 text-gray-400 transition hover:bg-red-500/10 hover:text-red-400"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>
-            </div>
-
-            <div className="mt-5 text-xs text-gray-600">
-              Showing {filteredProspects.length} of {totalProspects} prospects
             </div>
           </section>
         </div>
@@ -503,6 +678,7 @@ export default function ProspectsPage() {
               </div>
 
               <button
+                type="button"
                 onClick={closeModal}
                 className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"
               >
@@ -522,7 +698,7 @@ export default function ProspectsPage() {
                     setForm({ ...form, name: event.target.value })
                   }
                   placeholder="Enter prospect name"
-                  className="w-full rounded-xl border border-white/10 bg-[#252525] px-4 py-3 text-sm outline-none focus:border-[#14E1E6]"
+                  className={inputClass}
                 />
               </div>
 
@@ -539,7 +715,7 @@ export default function ProspectsPage() {
                       setForm({ ...form, phone: event.target.value })
                     }
                     placeholder="081234567890"
-                    className="w-full rounded-xl border border-white/10 bg-[#252525] px-4 py-3 text-sm outline-none focus:border-[#14E1E6]"
+                    className={inputClass}
                   />
                 </div>
 
@@ -554,22 +730,22 @@ export default function ProspectsPage() {
                       setForm({ ...form, email: event.target.value })
                     }
                     placeholder="email@example.com"
-                    className="w-full rounded-xl border border-white/10 bg-[#252525] px-4 py-3 text-sm outline-none focus:border-[#14E1E6]"
+                    className={inputClass}
                   />
                 </div>
               </div>
 
               <div>
                 <label className="mb-2 block text-sm text-gray-400">
-                  Membership Interest
+                  Interest (Optional)
                 </label>
                 <input
                   value={form.interest}
                   onChange={(event) =>
                     setForm({ ...form, interest: event.target.value })
                   }
-                  placeholder="Example: Membership Gold"
-                  className="w-full rounded-xl border border-white/10 bg-[#252525] px-4 py-3 text-sm outline-none focus:border-[#14E1E6]"
+                  placeholder="Masukkan minat calon member (opsional)"
+                  className={inputClass}
                 />
               </div>
 
@@ -586,7 +762,7 @@ export default function ProspectsPage() {
                         status: event.target.value as ProspectStatus,
                       })
                     }
-                    className="w-full rounded-xl border border-white/10 bg-[#252525] px-4 py-3 text-sm outline-none focus:border-[#14E1E6]"
+                    className={inputClass}
                   >
                     {statusOptions.map((status) => (
                       <option key={status.value} value={status.value}>
@@ -609,7 +785,7 @@ export default function ProspectsPage() {
                         nextFollowUp: event.target.value,
                       })
                     }
-                    className="w-full rounded-xl border border-white/10 bg-[#252525] px-4 py-3 text-sm outline-none focus:border-[#14E1E6]"
+                    className={inputClass}
                   />
                 </div>
               </div>
@@ -625,14 +801,21 @@ export default function ProspectsPage() {
                     setForm({ ...form, notes: event.target.value })
                   }
                   placeholder="Add notes about this prospect..."
-                  className="w-full resize-none rounded-xl border border-white/10 bg-[#252525] px-4 py-3 text-sm outline-none focus:border-[#14E1E6]"
+                  className={`${inputClass} resize-none`}
                 />
               </div>
+
+              {error && (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+                  {error}
+                </div>
+              )}
 
               <div className="flex gap-3 pt-3">
                 <button
                   type="button"
                   onClick={closeModal}
+                  disabled={saving}
                   className="flex-1 rounded-xl border border-white/10 py-3 text-sm text-gray-300 transition hover:bg-white/5"
                 >
                   Cancel
@@ -640,9 +823,17 @@ export default function ProspectsPage() {
 
                 <button
                   type="submit"
-                  className="flex-1 rounded-xl bg-[#14E1E6] py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0]"
+                  disabled={saving}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#14E1E6] py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0] disabled:opacity-50"
                 >
-                  {editingId ? "Save Changes" : "Save Prospect"}
+                  {saving && (
+                    <LoaderCircle size={17} className="animate-spin" />
+                  )}
+                  {saving
+                    ? "Saving..."
+                    : editingId
+                      ? "Save Changes"
+                      : "Save Prospect"}
                 </button>
               </div>
             </form>
