@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Users,
@@ -15,9 +15,13 @@ import {
   Phone,
   Filter,
   RefreshCw,
+  LoaderCircle,
+  AlertCircle,
 } from "lucide-react";
+
 import Sidebar from "@/components/dashboard/Sidebar";
 import Header from "@/components/dashboard/Header";
+import { supabase } from "@/lib/supabase";
 
 type Member = {
   id: string;
@@ -31,10 +35,38 @@ type Member = {
   createdAt?: string;
 };
 
+type DatabaseMember = {
+  id: string;
+  membership_number: string;
+  name: string;
+  email: string;
+  phone: string;
+  date_of_birth: string;
+  valid_from: string;
+  valid_until: string;
+  created_at: string;
+};
+
 type Status = "ACTIVE" | "EXPIRING_SOON" | "EXPIRED";
 
-const STORAGE_KEY = "membership_members";
 const WARNING_DAYS = 30;
+
+const inputClass =
+  "mt-2 w-full rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-sm text-white outline-none focus:border-[#14E1E6]";
+
+function mapDatabaseMember(row: DatabaseMember): Member {
+  return {
+    id: row.id,
+    membershipNumber: row.membership_number,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    dateOfBirth: row.date_of_birth,
+    validFrom: row.valid_from,
+    validUntil: row.valid_until,
+    createdAt: row.created_at,
+  };
+}
 
 function getMemberStatus(validUntil: string, today: string): Status {
   if (!today || !validUntil) return "ACTIVE";
@@ -89,33 +121,60 @@ export default function MembersPage() {
   const [today, setToday] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Member | null>(null);
+
   const [loaded, setLoaded] = useState(false);
+  const [loadingAction, setLoadingAction] = useState(false);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  // GET MEMBERS FROM SUPABASE
+  const fetchMembers = useCallback(async () => {
+    setLoaded(false);
+    setError("");
+
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        window.location.replace("/login");
+        return;
+      }
+
+      const { data, error: fetchError } = await supabase
+        .from("members")
+        .select(
+          "id, membership_number, name, email, phone, date_of_birth, valid_from, valid_until, created_at",
+        )
+        .order("created_at", { ascending: false });
+
+      if (fetchError) {
+        console.error("FETCH MEMBERS ERROR:", fetchError);
+        setError(fetchError.message);
+        return;
+      }
+
+      setMembers(((data ?? []) as DatabaseMember[]).map(mapDatabaseMember));
+    } catch (err) {
+      console.error("FETCH MEMBERS ERROR:", err);
+      setError("Gagal mengambil data member dari database.");
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
 
   useEffect(() => {
     setToday(new Date().toISOString().slice(0, 10));
+    void fetchMembers();
+  }, [fetchMembers]);
 
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) setMembers(parsed);
-      }
-    } catch {
-      setMessage("Data member gagal dibaca dari browser.");
-    }
-
-    setLoaded(true);
-  }, []);
-
-  function saveMembers(data: Member[]) {
-    setMembers(data);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }
-
+  // MEMBER STATUS
   const membersWithStatus = useMemo(() => {
     return members.map((member) => ({
       ...member,
@@ -123,9 +182,10 @@ export default function MembersPage() {
     }));
   }, [members, today]);
 
+  // SEARCH AND FILTER
   const filteredMembers = useMemo(() => {
     return membersWithStatus.filter((member) => {
-      const keyword = search.toLowerCase();
+      const keyword = search.toLowerCase().trim();
 
       const matchesSearch =
         member.name.toLowerCase().includes(keyword) ||
@@ -141,43 +201,136 @@ export default function MembersPage() {
   }, [membersWithStatus, search, statusFilter]);
 
   const activeCount = membersWithStatus.filter(
-    (m) => m.status === "ACTIVE",
+    (member) => member.status === "ACTIVE",
   ).length;
 
   const expiringCount = membersWithStatus.filter(
-    (m) => m.status === "EXPIRING_SOON",
+    (member) => member.status === "EXPIRING_SOON",
   ).length;
 
   const expiredCount = membersWithStatus.filter(
-    (m) => m.status === "EXPIRED",
+    (member) => member.status === "EXPIRED",
   ).length;
 
-  function handleEdit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!editingMember) return;
+  // UPDATE MEMBER IN SUPABASE
+  async function handleEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-    if (editingMember.validUntil < editingMember.validFrom) {
-      setMessage("Tanggal berakhir harus setelah tanggal mulai.");
+    if (!editingMember || loadingAction) return;
+
+    setMessage("");
+    setError("");
+
+    if (!editingMember.name.trim()) {
+      setError("Nama member wajib diisi.");
       return;
     }
 
-    const updated = members.map((member) =>
-      member.id === editingMember.id ? editingMember : member,
-    );
+    if (editingMember.validUntil < editingMember.validFrom) {
+      setError("Tanggal berakhir harus setelah tanggal mulai.");
+      return;
+    }
 
-    saveMembers(updated);
-    setEditingMember(null);
-    setMessage("Data member berhasil diperbarui.");
+    if (editingMember.dateOfBirth >= editingMember.validFrom) {
+      setError("Tanggal lahir harus sebelum tanggal mulai membership.");
+      return;
+    }
+
+    setLoadingAction(true);
+
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        window.location.replace("/login");
+        return;
+      }
+
+      const updateData = {
+        name: editingMember.name.trim(),
+        email: editingMember.email.trim().toLowerCase(),
+        phone: editingMember.phone.trim(),
+        date_of_birth: editingMember.dateOfBirth,
+        valid_from: editingMember.validFrom,
+        valid_until: editingMember.validUntil,
+      };
+
+      const { data: updatedMember, error: updateError } = await supabase
+        .from("members")
+        .update(updateData)
+        .eq("id", editingMember.id)
+        .select("id")
+        .maybeSingle();
+
+      if (updateError) {
+        console.error("UPDATE MEMBER ERROR:", updateError);
+        setError(updateError.message);
+        return;
+      }
+
+      if (!updatedMember) {
+        setError(
+          "Member tidak ditemukan atau kamu tidak memiliki izin untuk mengubah data ini.",
+        );
+        return;
+      }
+
+      setEditingMember(null);
+      setMessage("Data member berhasil diperbarui.");
+
+      await fetchMembers();
+    } catch (err) {
+      console.error("UPDATE MEMBER ERROR:", err);
+      setError("Gagal memperbarui data member.");
+    } finally {
+      setLoadingAction(false);
+    }
   }
 
-  function handleDelete() {
-    if (!deleteTarget) return;
+  // DELETE MEMBER FROM SUPABASE
+  async function handleDelete() {
+    if (!deleteTarget || loadingAction) return;
 
-    const updated = members.filter((member) => member.id !== deleteTarget.id);
+    setLoadingAction(true);
+    setError("");
+    setMessage("");
 
-    saveMembers(updated);
-    setDeleteTarget(null);
-    setMessage("Member berhasil dihapus.");
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        window.location.replace("/login");
+        return;
+      }
+
+      const { error: deleteError } = await supabase
+        .from("members")
+        .delete()
+        .eq("id", deleteTarget.id);
+
+      if (deleteError) {
+        console.error("DELETE MEMBER ERROR:", deleteError);
+        setError(deleteError.message);
+        return;
+      }
+
+      setDeleteTarget(null);
+      setSelectedMember(null);
+      setMessage("Member berhasil dihapus.");
+
+      await fetchMembers();
+    } catch (err) {
+      console.error("DELETE MEMBER ERROR:", err);
+      setError("Gagal menghapus member.");
+    } finally {
+      setLoadingAction(false);
+    }
   }
 
   function updateEditing(field: keyof Member, value: string) {
@@ -189,8 +342,10 @@ export default function MembersPage() {
     });
   }
 
-  const inputClass =
-    "mt-2 w-full rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-sm text-white outline-none focus:border-[#14E1E6]";
+  function resetFilters() {
+    setSearch("");
+    setStatusFilter("ALL");
+  }
 
   return (
     <div className="min-h-screen bg-[#151515] text-white">
@@ -200,6 +355,7 @@ export default function MembersPage() {
         <Header />
 
         <div className="space-y-7 p-8">
+          {/* HEADER */}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold">All Members</h1>
@@ -261,9 +417,10 @@ export default function MembersPage() {
                   size={19}
                   className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
                 />
+
                 <input
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search name, email, phone, or membership number..."
                   className="w-full rounded-xl border border-white/10 bg-[#202020] py-3 pl-12 pr-4 text-sm outline-none focus:border-[#14E1E6]"
                 />
@@ -271,9 +428,10 @@ export default function MembersPage() {
 
               <div className="flex items-center gap-3">
                 <Filter size={18} className="text-gray-500" />
+
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  onChange={(event) => setStatusFilter(event.target.value)}
                   className="rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-sm text-white outline-none focus:border-[#14E1E6]"
                 >
                   <option value="ALL">All Status</option>
@@ -283,18 +441,35 @@ export default function MembersPage() {
                 </select>
 
                 <button
-                  onClick={() => {
-                    setSearch("");
-                    setStatusFilter("ALL");
-                  }}
-                  className="rounded-xl border border-white/10 p-3 text-gray-400 hover:bg-white/5"
+                  onClick={resetFilters}
                   title="Reset filter"
+                  className="rounded-xl border border-white/10 p-3 text-gray-400 hover:bg-white/5"
+                >
+                  <RefreshCw size={17} />
+                </button>
+
+                <button
+                  onClick={() => void fetchMembers()}
+                  disabled={!loaded}
+                  title="Refresh members"
+                  className="rounded-xl border border-white/10 p-3 text-gray-400 hover:border-[#14E1E6] hover:text-[#14E1E6] disabled:opacity-50"
                 >
                   <RefreshCw size={17} />
                 </button>
               </div>
             </div>
           </section>
+
+          {/* MESSAGE */}
+          {error && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
+              <AlertCircle size={18} className="mt-0.5 shrink-0" />
+              <span>{error}</span>
+              <button className="ml-auto" onClick={() => setError("")}>
+                <X size={17} />
+              </button>
+            </div>
+          )}
 
           {message && (
             <div className="flex items-center justify-between rounded-xl border border-[#14E1E6]/20 bg-[#14E1E6]/5 p-4 text-sm text-[#14E1E6]">
@@ -314,22 +489,30 @@ export default function MembersPage() {
                   Showing {filteredMembers.length} of {members.length} members
                 </p>
               </div>
+
               <Users size={20} className="text-[#14E1E6]" />
             </div>
 
             {!loaded ? (
               <div className="p-12 text-center text-sm text-gray-500">
-                Loading members...
+                <LoaderCircle size={24} className="mx-auto mb-3 animate-spin" />
+                Loading members from Supabase...
+              </div>
+            ) : error && members.length === 0 ? (
+              <div className="p-12 text-center text-sm text-red-400">
+                Failed to load members. Check your database permissions.
               </div>
             ) : filteredMembers.length === 0 ? (
               <div className="p-12 text-center">
                 <Users size={35} className="mx-auto text-gray-600" />
                 <h3 className="mt-4 font-semibold">No members found</h3>
+
                 <p className="mt-2 text-sm text-gray-500">
                   {members.length === 0
                     ? "You have not registered any members yet."
                     : "Try changing your search or filter."}
                 </p>
+
                 {members.length === 0 && (
                   <Link
                     href="/members/new"
@@ -365,6 +548,7 @@ export default function MembersPage() {
                             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#14E1E6]/10 font-semibold text-[#14E1E6]">
                               {member.name.charAt(0).toUpperCase()}
                             </div>
+
                             <div>
                               <p className="text-sm font-semibold">
                                 {member.name}
@@ -392,7 +576,9 @@ export default function MembersPage() {
                         </td>
 
                         <td className="px-5 py-4">
-                          <StatusBadge status={member.status} />
+                          <StatusBadge
+                            status={getMemberStatus(member.validUntil, today)}
+                          />
                         </td>
 
                         <td className="px-5 py-4">
@@ -404,15 +590,23 @@ export default function MembersPage() {
                             >
                               <Eye size={16} />
                             </button>
+
                             <button
-                              onClick={() => setEditingMember({ ...member })}
+                              onClick={() => {
+                                setError("");
+                                setEditingMember({ ...member });
+                              }}
                               title="Edit member"
                               className="rounded-lg border border-white/10 p-2 text-gray-400 hover:border-yellow-400 hover:text-yellow-400"
                             >
                               <Pencil size={16} />
                             </button>
+
                             <button
-                              onClick={() => setDeleteTarget(member)}
+                              onClick={() => {
+                                setError("");
+                                setDeleteTarget(member);
+                              }}
                               title="Delete member"
                               className="rounded-lg border border-white/10 p-2 text-gray-400 hover:border-red-400 hover:text-red-400"
                             >
@@ -445,6 +639,7 @@ export default function MembersPage() {
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#14E1E6]/10 text-xl font-bold text-[#14E1E6]">
                 {selectedMember.name.charAt(0).toUpperCase()}
               </div>
+
               <div>
                 <h3 className="font-semibold">{selectedMember.name}</h3>
                 <p className="mt-1 text-xs text-gray-500">
@@ -458,20 +653,25 @@ export default function MembersPage() {
                 <Mail size={17} className="text-gray-500" />
                 {selectedMember.email}
               </p>
+
               <p className="flex items-center gap-3 text-gray-300">
                 <Phone size={17} className="text-gray-500" />
                 {selectedMember.phone}
               </p>
+
               <p className="flex items-center gap-3 text-gray-300">
                 <CalendarDays size={17} className="text-gray-500" />
                 Birth: {formatDate(selectedMember.dateOfBirth)}
               </p>
+
               <div className="rounded-xl bg-[#252525] p-4">
                 <p className="mb-3 text-xs text-gray-500">Membership Period</p>
+
                 <p>
                   {formatDate(selectedMember.validFrom)} –{" "}
                   {formatDate(selectedMember.validUntil)}
                 </p>
+
                 <div className="mt-3">
                   <StatusBadge
                     status={getMemberStatus(selectedMember.validUntil, today)}
@@ -503,7 +703,9 @@ export default function MembersPage() {
                 <input
                   required
                   value={editingMember.name}
-                  onChange={(e) => updateEditing("name", e.target.value)}
+                  onChange={(event) =>
+                    updateEditing("name", event.target.value)
+                  }
                   className={inputClass}
                 />
               </label>
@@ -514,7 +716,9 @@ export default function MembersPage() {
                   required
                   type="email"
                   value={editingMember.email}
-                  onChange={(e) => updateEditing("email", e.target.value)}
+                  onChange={(event) =>
+                    updateEditing("email", event.target.value)
+                  }
                   className={inputClass}
                 />
               </label>
@@ -524,7 +728,9 @@ export default function MembersPage() {
                 <input
                   required
                   value={editingMember.phone}
-                  onChange={(e) => updateEditing("phone", e.target.value)}
+                  onChange={(event) =>
+                    updateEditing("phone", event.target.value)
+                  }
                   className={inputClass}
                 />
               </label>
@@ -535,7 +741,9 @@ export default function MembersPage() {
                   required
                   type="date"
                   value={editingMember.dateOfBirth}
-                  onChange={(e) => updateEditing("dateOfBirth", e.target.value)}
+                  onChange={(event) =>
+                    updateEditing("dateOfBirth", event.target.value)
+                  }
                   className={inputClass}
                 />
               </label>
@@ -546,7 +754,9 @@ export default function MembersPage() {
                   required
                   type="date"
                   value={editingMember.validFrom}
-                  onChange={(e) => updateEditing("validFrom", e.target.value)}
+                  onChange={(event) =>
+                    updateEditing("validFrom", event.target.value)
+                  }
                   className={inputClass}
                 />
               </label>
@@ -558,24 +768,38 @@ export default function MembersPage() {
                   type="date"
                   min={editingMember.validFrom}
                   value={editingMember.validUntil}
-                  onChange={(e) => updateEditing("validUntil", e.target.value)}
+                  onChange={(event) =>
+                    updateEditing("validUntil", event.target.value)
+                  }
                   className={inputClass}
                 />
               </label>
             </div>
 
+            {error && (
+              <p className="mt-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-400">
+                {error}
+              </p>
+            )}
+
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setEditingMember(null)}
+                disabled={loadingAction}
                 className="rounded-xl border border-white/10 px-5 py-3 text-sm text-gray-300"
               >
                 Cancel
               </button>
+
               <button
                 type="submit"
-                className="rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black"
+                disabled={loadingAction}
+                className="flex items-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
               >
+                {loadingAction && (
+                  <LoaderCircle size={16} className="animate-spin" />
+                )}
                 Save Changes
               </button>
             </div>
@@ -590,22 +814,37 @@ export default function MembersPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-400">
               <Trash2 size={22} />
             </div>
+
             <h2 className="mt-4 text-lg font-bold">Delete Member?</h2>
+
             <p className="mt-2 text-sm text-gray-400">
               Are you sure you want to delete {deleteTarget.name}? This action
               cannot be undone.
             </p>
+
+            {error && (
+              <p className="mt-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-400">
+                {error}
+              </p>
+            )}
+
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => setDeleteTarget(null)}
+                disabled={loadingAction}
                 className="rounded-xl border border-white/10 px-4 py-2.5 text-sm"
               >
                 Cancel
               </button>
+
               <button
                 onClick={handleDelete}
-                className="rounded-xl bg-red-500 px-4 py-2.5 text-sm font-semibold text-white"
+                disabled={loadingAction}
+                className="flex items-center gap-2 rounded-xl bg-red-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
               >
+                {loadingAction && (
+                  <LoaderCircle size={16} className="animate-spin" />
+                )}
                 Delete
               </button>
             </div>

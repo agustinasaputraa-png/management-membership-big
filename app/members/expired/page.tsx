@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ArrowLeft,
@@ -15,10 +15,14 @@ import {
   Clock,
   AlertTriangle,
   RefreshCw,
+  LoaderCircle,
+  AlertCircle,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 type Member = {
   id: string;
+  membershipNumber: string;
   name: string;
   email: string;
   phone: string;
@@ -27,55 +31,33 @@ type Member = {
   validUntil: string;
 };
 
-const members: Member[] = [
-  {
-    id: "MBR-001",
-    name: "John Doe",
-    email: "john@example.com",
-    phone: "+62 812 3456 7890",
-    dateOfBirth: "1995-04-12",
-    validFrom: "2026-01-01",
-    validUntil: "2026-12-31",
-  },
-  {
-    id: "MBR-002",
-    name: "Jane Smith",
-    email: "jane@example.com",
-    phone: "+62 813 4567 8901",
-    dateOfBirth: "1998-08-20",
-    validFrom: "2025-11-01",
-    validUntil: "2026-11-10",
-  },
-  {
-    id: "MBR-003",
-    name: "Michael Lee",
-    email: "michael@example.com",
-    phone: "+62 812 1111 2222",
-    dateOfBirth: "1990-02-15",
-    validFrom: "2025-01-01",
-    validUntil: "2026-10-20",
-  },
-  {
-    id: "MBR-004",
-    name: "Sarah Johnson",
-    email: "sarah@example.com",
-    phone: "+62 878 1234 5678",
-    dateOfBirth: "1997-06-09",
-    validFrom: "2026-03-01",
-    validUntil: "2027-02-28",
-  },
-  {
-    id: "MBR-005",
-    name: "David Wilson",
-    email: "david@example.com",
-    phone: "+62 822 3333 4444",
-    dateOfBirth: "1992-12-01",
-    validFrom: "2025-06-01",
-    validUntil: "2026-11-05",
-  },
-];
+type MemberRow = {
+  id: string;
+  membership_number: string;
+  name: string;
+  email: string;
+  phone: string;
+  date_of_birth: string;
+  valid_from: string;
+  valid_until: string;
+};
+
+function mapMember(row: MemberRow): Member {
+  return {
+    id: row.id,
+    membershipNumber: row.membership_number,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    dateOfBirth: row.date_of_birth,
+    validFrom: row.valid_from,
+    validUntil: row.valid_until,
+  };
+}
 
 function formatDate(date: string): string {
+  if (!date) return "-";
+
   return new Date(`${date}T00:00:00`).toLocaleDateString("id-ID", {
     day: "2-digit",
     month: "short",
@@ -85,8 +67,23 @@ function formatDate(date: string): string {
 
 function getDaysExpired(validUntil: string, today: Date): number {
   const expiry = new Date(`${validUntil}T00:00:00`);
+  return Math.max(
+    0,
+    Math.floor((today.getTime() - expiry.getTime()) / 86400000),
+  );
+}
 
-  return Math.floor((today.getTime() - expiry.getTime()) / 86400000);
+function getWhatsAppLink(phone: string, name: string) {
+  let number = phone.replace(/\D/g, "");
+
+  if (number.startsWith("0")) number = `62${number.slice(1)}`;
+  else if (!number.startsWith("62") && number.length > 0) {
+    number = `62${number}`;
+  }
+
+  const message = `Halo ${name}, kami ingin menginformasikan bahwa masa membership Anda telah berakhir. Silakan hubungi kami jika ingin melakukan perpanjangan membership.`;
+
+  return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 }
 
 function StatCard({
@@ -96,7 +93,7 @@ function StatCard({
   iconColor,
 }: {
   title: string;
-  value: number;
+  value: number | string;
   icon: ReactNode;
   iconColor: string;
 }) {
@@ -106,7 +103,6 @@ function StatCard({
         <p className="text-sm text-gray-400">{title}</p>
         <span className={iconColor}>{icon}</span>
       </div>
-
       <p className="mt-4 text-3xl font-bold text-white">{value}</p>
     </div>
   );
@@ -124,7 +120,6 @@ function DetailRow({
   return (
     <div className="flex items-center gap-3">
       <div className="text-gray-500">{icon}</div>
-
       <div className="min-w-0 flex-1">
         <p className="text-xs text-gray-500">{label}</p>
         <p className="mt-1 break-words text-sm text-white">{value}</p>
@@ -134,33 +129,82 @@ function DetailRow({
 }
 
 export default function ExpiredMembersPage() {
+  const [members, setMembers] = useState<Member[]>([]);
   const [search, setSearch] = useState("");
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [today, setToday] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+
+  const fetchMembers = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+
+    setError("");
+
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        window.location.replace("/login");
+        return;
+      }
+
+      const { data, error: fetchError } = await supabase
+        .from("members")
+        .select(
+          "id, membership_number, name, email, phone, date_of_birth, valid_from, valid_until",
+        )
+        .order("valid_until", { ascending: true });
+
+      if (fetchError) {
+        console.error("FETCH EXPIRED MEMBERS ERROR:", fetchError);
+        setError(fetchError.message);
+        return;
+      }
+
+      setMembers(((data ?? []) as MemberRow[]).map(mapMember));
+    } catch (err) {
+      console.error("FETCH EXPIRED MEMBERS ERROR:", err);
+      setError("Gagal mengambil data membership dari database.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
     const currentDate = new Date();
     currentDate.setHours(0, 0, 0, 0);
     setToday(currentDate);
-  }, []);
+    void fetchMembers();
+  }, [fetchMembers]);
 
   const expiredMembers = useMemo(() => {
     if (!today) return [];
 
     return members.filter((member) => {
       const expiry = new Date(`${member.validUntil}T00:00:00`);
-
       return expiry.getTime() < today.getTime();
     });
-  }, [today]);
+  }, [members, today]);
 
   const filteredMembers = useMemo(() => {
     const keyword = search.toLowerCase().trim();
 
     return expiredMembers.filter((member) => {
-      return [member.id, member.name, member.email, member.phone].some(
-        (value) => value.toLowerCase().includes(keyword),
-      );
+      if (!keyword) return true;
+
+      return [
+        member.membershipNumber,
+        member.name,
+        member.email,
+        member.phone,
+      ].some((value) => value.toLowerCase().includes(keyword));
     });
   }, [expiredMembers, search]);
 
@@ -174,7 +218,6 @@ export default function ExpiredMembersPage() {
   return (
     <main className="min-h-screen bg-[#151515] px-4 py-6 text-white sm:px-6 lg:px-10">
       <div className="mx-auto max-w-7xl">
-        {/* Header */}
         <div className="mb-8">
           <Link
             href="/"
@@ -189,60 +232,76 @@ export default function ExpiredMembersPage() {
               <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-red-500/10 text-red-400">
                 <AlertTriangle size={24} />
               </div>
-
               <h1 className="text-2xl font-bold sm:text-3xl">
                 Expired Members
               </h1>
-
               <p className="mt-2 text-sm text-gray-400">
                 Monitor members whose membership has expired.
               </p>
             </div>
 
-            <Link
-              href="/members"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#202020] px-5 py-3 text-sm font-medium text-white transition hover:border-[#14E1E6]/40 hover:text-[#14E1E6]"
-            >
-              <Users size={18} />
-              All Members
-            </Link>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => void fetchMembers(true)}
+                disabled={loading || refreshing}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-sm font-medium text-white transition hover:border-[#14E1E6]/40 hover:text-[#14E1E6] disabled:opacity-50"
+              >
+                <RefreshCw
+                  size={17}
+                  className={refreshing ? "animate-spin" : ""}
+                />
+                Refresh
+              </button>
+              <Link
+                href="/members"
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#202020] px-5 py-3 text-sm font-medium text-white transition hover:border-[#14E1E6]/40 hover:text-[#14E1E6]"
+              >
+                <Users size={18} />
+                All Members
+              </Link>
+            </div>
           </div>
         </div>
 
-        {/* Statistics */}
         <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <StatCard
             title="Total Expired Members"
-            value={expiredMembers.length}
+            value={loading ? "..." : expiredMembers.length}
             icon={<Users size={21} />}
             iconColor="text-red-400"
           />
-
           <StatCard
             title="Total Days Expired"
-            value={totalDaysExpired}
+            value={loading ? "..." : totalDaysExpired.toLocaleString("id-ID")}
             icon={<Clock size={21} />}
             iconColor="text-yellow-400"
           />
-
           <StatCard
             title="Members Requiring Renewal"
-            value={expiredMembers.length}
+            value={loading ? "..." : expiredMembers.length}
             icon={<RefreshCw size={21} />}
             iconColor="text-[#14E1E6]"
           />
         </div>
 
-        {/* Expired Members Table */}
+        {error && (
+          <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
+            <AlertCircle size={18} className="mt-0.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1c1c1c]">
           <div className="flex flex-col gap-4 border-b border-white/10 p-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold">
                 Expired Member Directory
               </h2>
-
               <p className="mt-1 text-sm text-gray-500">
-                Members whose validity period has ended.
+                Showing {filteredMembers.length} of {expiredMembers.length}{" "}
+                expired members
+                {loading ? " · Loading..." : " · Supabase"}
               </p>
             </div>
 
@@ -251,7 +310,6 @@ export default function ExpiredMembersPage() {
                 size={18}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
               />
-
               <input
                 type="text"
                 placeholder="Search expired members..."
@@ -277,13 +335,17 @@ export default function ExpiredMembersPage() {
               </thead>
 
               <tbody className="divide-y divide-white/5">
-                {!today ? (
+                {loading ? (
                   <tr>
                     <td
                       colSpan={7}
                       className="px-5 py-12 text-center text-gray-500"
                     >
-                      Loading members...
+                      <LoaderCircle
+                        size={24}
+                        className="mx-auto mb-3 animate-spin text-[#14E1E6]"
+                      />
+                      Loading members from Supabase...
                     </td>
                   </tr>
                 ) : filteredMembers.length === 0 ? (
@@ -292,15 +354,13 @@ export default function ExpiredMembersPage() {
                       <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400">
                         <Users size={22} />
                       </div>
-
                       <p className="font-medium text-white">
                         No expired members found
                       </p>
-
                       <p className="mt-2 text-sm text-gray-500">
                         {search
                           ? "Try another search keyword."
-                          : "All memberships are currently valid."}
+                          : "No memberships have expired."}
                       </p>
                     </td>
                   </tr>
@@ -308,7 +368,7 @@ export default function ExpiredMembersPage() {
                   filteredMembers.map((member) => {
                     const daysExpired = getDaysExpired(
                       member.validUntil,
-                      today,
+                      today!,
                     );
 
                     return (
@@ -320,36 +380,29 @@ export default function ExpiredMembersPage() {
                           <p className="font-medium text-white">
                             {member.name}
                           </p>
-
                           <p className="mt-1 text-xs text-gray-500">
-                            {member.id} · {member.email}
+                            {member.membershipNumber} · {member.email}
                           </p>
                         </td>
-
                         <td className="px-5 py-4 text-gray-400">
                           {member.phone}
                         </td>
-
                         <td className="px-5 py-4 text-gray-400">
                           {formatDate(member.validFrom)}
                         </td>
-
                         <td className="px-5 py-4 text-gray-400">
                           {formatDate(member.validUntil)}
                         </td>
-
                         <td className="px-5 py-4">
                           <span className="font-medium text-red-400">
                             {daysExpired} days
                           </span>
                         </td>
-
                         <td className="px-5 py-4">
                           <span className="inline-flex rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400">
                             Expired
                           </span>
                         </td>
-
                         <td className="px-5 py-4">
                           <div className="flex justify-end gap-2">
                             <button
@@ -360,19 +413,15 @@ export default function ExpiredMembersPage() {
                             >
                               <Eye size={17} />
                             </button>
-
-                            <button
-                              type="button"
-                              title="Renew membership"
-                              onClick={() =>
-                                alert(
-                                  `Renew membership for ${member.name} will be available after backend integration.`,
-                                )
-                              }
-                              className="rounded-lg border border-white/10 p-2 text-gray-400 transition hover:border-[#14E1E6]/40 hover:text-[#14E1E6]"
+                            <a
+                              href={getWhatsAppLink(member.phone, member.name)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Contact via WhatsApp"
+                              className="rounded-lg border border-green-500/20 p-2 text-green-400 transition hover:bg-green-500/10"
                             >
-                              <RefreshCw size={17} />
-                            </button>
+                              <MessageCircle size={17} />
+                            </a>
                           </div>
                         </td>
                       </tr>
@@ -388,13 +437,11 @@ export default function ExpiredMembersPage() {
               Showing {filteredMembers.length} of {expiredMembers.length}{" "}
               expired members
             </span>
-
             <span>Membership Management</span>
           </div>
         </section>
       </div>
 
-      {/* Member Detail Modal */}
       {selectedMember && today && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
@@ -407,12 +454,10 @@ export default function ExpiredMembersPage() {
             <div className="mb-6 flex items-start justify-between">
               <div>
                 <h2 className="text-xl font-bold">Member Details</h2>
-
                 <p className="mt-1 text-sm text-gray-500">
-                  {selectedMember.id}
+                  {selectedMember.membershipNumber}
                 </p>
               </div>
-
               <button
                 type="button"
                 onClick={() => setSelectedMember(null)}
@@ -426,16 +471,13 @@ export default function ExpiredMembersPage() {
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10 text-xl font-bold text-red-400">
                 {selectedMember.name.charAt(0).toUpperCase()}
               </div>
-
               <div className="min-w-0">
                 <h3 className="truncate font-semibold">
                   {selectedMember.name}
                 </h3>
-
                 <p className="mt-1 text-xs text-gray-500">
-                  {selectedMember.id}
+                  {selectedMember.membershipNumber}
                 </p>
-
                 <span className="mt-2 inline-flex rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400">
                   Expired
                 </span>
@@ -448,33 +490,27 @@ export default function ExpiredMembersPage() {
                 label="Email"
                 value={selectedMember.email}
               />
-
               <DetailRow
                 icon={<Phone size={17} />}
                 label="Phone"
                 value={selectedMember.phone}
               />
-
               <DetailRow
                 icon={<CalendarDays size={17} />}
                 label="Date of Birth"
                 value={formatDate(selectedMember.dateOfBirth)}
               />
-
               <div className="my-4 border-t border-white/10" />
-
               <DetailRow
                 icon={<CalendarDays size={17} />}
                 label="Membership Start"
                 value={formatDate(selectedMember.validFrom)}
               />
-
               <DetailRow
                 icon={<CalendarDays size={17} />}
                 label="Membership Expiry"
                 value={formatDate(selectedMember.validUntil)}
               />
-
               <DetailRow
                 icon={<Clock size={17} />}
                 label="Days Since Expiry"
@@ -485,13 +521,15 @@ export default function ExpiredMembersPage() {
               />
             </div>
 
-            <button
-              type="button"
-              onClick={() => setSelectedMember(null)}
-              className="mt-7 w-full rounded-xl bg-[#14E1E6] py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0]"
+            <a
+              href={getWhatsAppLink(selectedMember.phone, selectedMember.name)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-green-500 py-3 text-sm font-semibold text-white transition hover:bg-green-600"
             >
-              Close
-            </button>
+              <MessageCircle size={18} />
+              Contact via WhatsApp
+            </a>
           </div>
         </div>
       )}
