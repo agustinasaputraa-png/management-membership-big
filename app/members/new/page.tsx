@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -9,12 +10,13 @@ import {
   User,
   Mail,
   Phone,
-  Calendar,
   Save,
   CheckCircle2,
   Users,
   LoaderCircle,
 } from "lucide-react";
+
+import DatePicker from "@/components/ui/DatePicker";
 import { supabase } from "@/lib/supabase";
 
 type Member = {
@@ -29,64 +31,110 @@ type Member = {
   created_at: string;
 };
 
-const inputClass =
-  "mt-2 w-full rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-[#14E1E6]";
+type MemberForm = {
+  name: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+  validFrom: string;
+  validUntil: string;
+};
 
-const labelClass = "text-sm font-medium text-gray-300";
+const initialForm: MemberForm = {
+  name: "",
+  email: "",
+  phone: "",
+  dateOfBirth: "",
+  validFrom: "",
+  validUntil: "",
+};
+
+const inputClass =
+  "mt-2 box-border min-h-[50px] w-full min-w-0 rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-base text-white outline-none transition placeholder:text-gray-600 focus:border-[#14E1E6] focus:ring-1 focus:ring-[#14E1E6]/30";
+
+const labelClass = "block text-sm font-medium text-gray-300";
+
+function generateMembershipNumber() {
+  const year = new Date().getFullYear();
+  const random = Math.floor(100000 + Math.random() * 900000);
+
+  return `MBR-${year}-${random}`;
+}
 
 export default function AddMemberPage() {
   const router = useRouter();
 
   const [today, setToday] = useState("");
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    dateOfBirth: "",
-    validFrom: "",
-    validUntil: "",
-  });
+  const [form, setForm] = useState<MemberForm>(initialForm);
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [createdMember, setCreatedMember] = useState<Member | null>(null);
 
+  // Mengambil tanggal lokal hanya di browser setelah mount.
+  // Ini mencegah error unstable new Date() saat prerender Next.js.
   useEffect(() => {
-    setToday(new Date().toISOString().slice(0, 10));
+    const date = new Date();
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+
+    setToday(`${year}-${month}-${day}`);
   }, []);
 
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const { name, value } = e.target;
-
+  function updateField(name: keyof MemberForm, value: string) {
     setForm((prev) => ({
       ...prev,
       [name]: value,
+
+      // Jika tanggal mulai digeser melewati tanggal akhir,
+      // kosongkan tanggal akhir agar user memilih ulang.
+      ...(name === "validFrom" && prev.validUntil && prev.validUntil < value
+        ? { validUntil: "" }
+        : {}),
     }));
 
     setError("");
   }
 
-  function generateMembershipNumber() {
-    const year = new Date().getFullYear();
-    const random = Math.floor(100000 + Math.random() * 900000);
-
-    return `MBR-${year}-${random}`;
-  }
-
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
 
     if (loading) return;
 
+    // Pastikan tanggal browser sudah tersedia.
+    if (!today) {
+      setError("Sedang memuat tanggal. Silakan coba kembali.");
+      return;
+    }
+
+    // Validasi data wajib.
     if (!form.name.trim()) {
       setError("Nama member wajib diisi.");
       return;
     }
 
-    if (form.validUntil < form.validFrom) {
-      setError("Tanggal berakhir harus setelah tanggal mulai.");
+    if (!form.email.trim()) {
+      setError("Email member wajib diisi.");
+      return;
+    }
+
+    if (!form.phone.trim()) {
+      setError("Nomor telepon wajib diisi.");
+      return;
+    }
+
+    if (!form.dateOfBirth || !form.validFrom || !form.validUntil) {
+      setError("Semua tanggal wajib diisi.");
+      return;
+    }
+
+    // Validasi tanggal lahir.
+    if (form.dateOfBirth > today) {
+      setError("Tanggal lahir tidak boleh di masa depan.");
       return;
     }
 
@@ -95,15 +143,16 @@ export default function AddMemberPage() {
       return;
     }
 
-    if (form.dateOfBirth > today) {
-      setError("Tanggal lahir tidak boleh di masa depan.");
+    // Validasi masa membership.
+    if (form.validUntil < form.validFrom) {
+      setError("Tanggal berakhir tidak boleh sebelum tanggal mulai.");
       return;
     }
 
     setLoading(true);
 
     try {
-      // Pastikan Admin sudah login
+      // Periksa autentikasi admin.
       const {
         data: { user },
         error: authError,
@@ -114,10 +163,8 @@ export default function AddMemberPage() {
         return;
       }
 
-      const membershipNumber = generateMembershipNumber();
-
       const memberData = {
-        membership_number: membershipNumber,
+        membership_number: generateMembershipNumber(),
         name: form.name.trim(),
         email: form.email.trim().toLowerCase(),
         phone: form.phone.trim(),
@@ -126,6 +173,7 @@ export default function AddMemberPage() {
         valid_until: form.validUntil,
       };
 
+      // Simpan member ke Supabase.
       const { data, error: insertError } = await supabase
         .from("members")
         .insert([memberData])
@@ -136,12 +184,10 @@ export default function AddMemberPage() {
         console.error("SUPABASE INSERT ERROR:", insertError);
 
         if (insertError.code === "23505") {
-          setError(
-            "Email atau Membership Number sudah digunakan. Silakan coba kembali."
-          );
+          setError("Email atau Membership Number sudah digunakan.");
         } else if (insertError.code === "42501") {
           setError(
-            "Akses ditolak oleh database. Periksa login dan kebijakan RLS Supabase."
+            "Akses ditolak database. Periksa login dan kebijakan RLS Supabase.",
           );
         } else {
           setError(insertError.message);
@@ -154,6 +200,7 @@ export default function AddMemberPage() {
       setSuccess(true);
     } catch (err) {
       console.error("CREATE MEMBER ERROR:", err);
+
       setError("Terjadi kesalahan saat menyimpan data. Silakan coba kembali.");
     } finally {
       setLoading(false);
@@ -161,45 +208,40 @@ export default function AddMemberPage() {
   }
 
   function resetForm() {
-    setForm({
-      name: "",
-      email: "",
-      phone: "",
-      dateOfBirth: "",
-      validFrom: "",
-      validUntil: "",
-    });
-
+    setForm(initialForm);
     setCreatedMember(null);
     setSuccess(false);
     setError("");
   }
 
   return (
-    <div className="min-h-screen bg-[#151515] p-6 text-white md:p-10">
-      <div className="mx-auto max-w-4xl">
+    <main className="min-h-screen w-full overflow-x-hidden bg-[#151515] p-4 text-white sm:p-6 md:p-10">
+      <div className="mx-auto w-full min-w-0 max-w-4xl">
+        {/* Back Navigation */}
         <Link
           href="/members"
-          className="mb-8 inline-flex items-center gap-2 text-sm text-gray-400 transition hover:text-[#14E1E6]"
+          className="mb-6 inline-flex min-h-11 items-center gap-2 text-sm text-gray-400 transition hover:text-[#14E1E6]"
         >
           <ArrowLeft size={18} />
           Back to All Members
         </Link>
 
+        {/* Page Header */}
         <div className="mb-8">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-[#14E1E6]/10 text-[#14E1E6]">
             <UserPlus size={24} />
           </div>
 
-          <h1 className="text-2xl font-bold">Create New Member</h1>
+          <h1 className="text-2xl font-bold sm:text-3xl">Create New Member</h1>
 
           <p className="mt-2 text-sm text-gray-500">
             Register a new member and create their membership account.
           </p>
         </div>
 
+        {/* Success State */}
         {success && createdMember ? (
-          <div className="rounded-2xl border border-[#14E1E6]/20 bg-[#1D1D1D] p-8">
+          <section className="rounded-2xl border border-[#14E1E6]/20 bg-[#1D1D1D] p-5 sm:p-8">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#14E1E6]/10 text-[#14E1E6]">
               <CheckCircle2 size={30} />
             </div>
@@ -215,201 +257,204 @@ export default function AddMemberPage() {
             <div className="mt-6 rounded-xl border border-white/10 bg-[#252525] p-5">
               <p className="text-xs text-gray-500">Membership Number</p>
 
-              <p className="mt-2 text-xl font-bold text-[#14E1E6]">
+              <p className="mt-2 break-all text-xl font-bold text-[#14E1E6]">
                 {createdMember.membership_number}
               </p>
 
-              <div className="mt-5 space-y-3 text-sm">
+              <div className="mt-5 space-y-3 break-words text-sm">
                 <p>{createdMember.name}</p>
+
                 <p className="text-gray-400">{createdMember.email}</p>
+
                 <p className="text-gray-400">{createdMember.phone}</p>
+
                 <p className="text-gray-400">
-                  Valid: {createdMember.valid_from} — {createdMember.valid_until}
+                  Valid: {createdMember.valid_from} —{" "}
+                  {createdMember.valid_until}
                 </p>
               </div>
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-3">
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button
+                type="button"
                 onClick={() => router.push("/members")}
-                className="flex items-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0]"
+                className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0]"
               >
                 <Users size={17} />
                 View All Members
               </button>
 
               <button
+                type="button"
                 onClick={resetForm}
-                className="rounded-xl border border-white/10 px-5 py-3 text-sm text-gray-300 transition hover:bg-white/5"
+                className="min-h-12 rounded-xl border border-white/10 px-5 py-3 text-sm text-gray-300 transition hover:bg-white/5"
               >
                 Add Another Member
               </button>
             </div>
-          </div>
+          </section>
         ) : (
+          /* Create Member Form */
           <form
             onSubmit={handleSubmit}
-            className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-6 md:p-8"
+            className="box-border w-full min-w-0 rounded-2xl border border-white/10 bg-[#1D1D1D] p-4 sm:p-6 md:p-8"
           >
+            {/* Personal Information */}
             <div className="mb-6 border-b border-white/10 pb-5">
               <h2 className="font-semibold">Personal Information</h2>
+
               <p className="mt-1 text-xs text-gray-500">
-                Enter the member's personal details.
+                Enter the member&apos;s personal details.
               </p>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-              <div>
+            <div className="grid min-w-0 grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
+              {/* Full Name */}
+              <div className="min-w-0">
                 <label htmlFor="name" className={labelClass}>
                   Full Name *
                 </label>
+
                 <div className="relative">
                   <User
-                    className="absolute left-4 top-5 text-gray-500"
+                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
                     size={18}
                   />
+
                   <input
                     id="name"
                     required
                     name="name"
+                    type="text"
+                    autoComplete="name"
                     value={form.name}
-                    onChange={handleChange}
+                    onChange={(e) => updateField("name", e.target.value)}
                     placeholder="Enter full name"
                     className={`${inputClass} pl-11`}
                   />
                 </div>
               </div>
 
-              <div>
+              {/* Email */}
+              <div className="min-w-0">
                 <label htmlFor="email" className={labelClass}>
                   Email Address *
                 </label>
+
                 <div className="relative">
                   <Mail
-                    className="absolute left-4 top-5 text-gray-500"
+                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
                     size={18}
                   />
+
                   <input
                     id="email"
                     required
                     type="email"
                     name="email"
+                    autoComplete="email"
                     value={form.email}
-                    onChange={handleChange}
+                    onChange={(e) => updateField("email", e.target.value)}
                     placeholder="example@email.com"
                     className={`${inputClass} pl-11`}
                   />
                 </div>
               </div>
 
-              <div>
+              {/* Phone */}
+              <div className="min-w-0">
                 <label htmlFor="phone" className={labelClass}>
                   Phone Number *
                 </label>
+
                 <div className="relative">
                   <Phone
-                    className="absolute left-4 top-5 text-gray-500"
+                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
                     size={18}
                   />
+
                   <input
                     id="phone"
                     required
                     type="tel"
                     name="phone"
+                    autoComplete="tel"
                     value={form.phone}
-                    onChange={handleChange}
+                    onChange={(e) => updateField("phone", e.target.value)}
                     placeholder="081234567890"
                     className={`${inputClass} pl-11`}
                   />
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="dateOfBirth" className={labelClass}>
-                  Date of Birth *
-                </label>
-                <div className="relative">
-                  <Calendar
-                    className="absolute left-4 top-5 text-gray-500"
-                    size={18}
-                  />
-                  <input
-                    id="dateOfBirth"
-                    required
-                    type="date"
-                    max={today || undefined}
-                    name="dateOfBirth"
-                    value={form.dateOfBirth}
-                    onChange={handleChange}
-                    className={`${inputClass} pl-11`}
-                  />
-                </div>
-              </div>
+              {/* Date of Birth */}
+              <DatePicker
+                label="Date of Birth"
+                value={form.dateOfBirth}
+                onChange={(value) => updateField("dateOfBirth", value)}
+                placeholder="Pilih tanggal lahir"
+                maxDate={today || undefined}
+                required
+              />
             </div>
 
-            <div className="mb-6 mt-10 border-b border-white/10 pb-5">
+            {/* Membership Information */}
+            <div className="mb-6 mt-9 border-b border-white/10 pb-5 sm:mt-10">
               <h2 className="font-semibold">Membership Information</h2>
+
               <p className="mt-1 text-xs text-gray-500">
                 Set the validity period of this membership.
               </p>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-              <div>
-                <label htmlFor="validFrom" className={labelClass}>
-                  Valid From *
-                </label>
-                <input
-                  id="validFrom"
-                  required
-                  type="date"
-                  name="validFrom"
-                  value={form.validFrom}
-                  onChange={handleChange}
-                  className={inputClass}
-                />
-              </div>
+            <div className="grid min-w-0 grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
+              {/* Valid From */}
+              <DatePicker
+                label="Valid From"
+                value={form.validFrom}
+                onChange={(value) => updateField("validFrom", value)}
+                placeholder="Pilih tanggal mulai"
+                required
+              />
 
-              <div>
-                <label htmlFor="validUntil" className={labelClass}>
-                  Valid Until *
-                </label>
-                <input
-                  id="validUntil"
-                  required
-                  type="date"
-                  name="validUntil"
-                  min={form.validFrom || undefined}
-                  value={form.validUntil}
-                  onChange={handleChange}
-                  className={inputClass}
-                />
-              </div>
+              {/* Valid Until */}
+              <DatePicker
+                label="Valid Until"
+                value={form.validUntil}
+                onChange={(value) => updateField("validUntil", value)}
+                placeholder="Pilih tanggal berakhir"
+                minDate={form.validFrom || undefined}
+                required
+              />
             </div>
 
+            {/* Error Message */}
             {error && (
               <div
                 role="alert"
-                className="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400"
+                aria-live="polite"
+                className="mt-6 break-words rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400"
               >
                 {error}
               </div>
             )}
 
-            <div className="mt-10 flex flex-col-reverse justify-end gap-3 border-t border-white/10 pt-6 sm:flex-row">
+            {/* Form Actions */}
+            <div className="mt-8 flex flex-col-reverse justify-end gap-3 border-t border-white/10 pt-6 sm:mt-10 sm:flex-row">
               <button
                 type="button"
                 onClick={() => router.push("/members")}
                 disabled={loading}
-                className="rounded-xl border border-white/10 px-6 py-3 text-sm text-gray-300 transition hover:bg-white/5"
+                className="min-h-12 rounded-xl border border-white/10 px-6 py-3 text-sm text-gray-300 transition hover:bg-white/5 disabled:opacity-50"
               >
                 Cancel
               </button>
 
               <button
                 type="submit"
-                disabled={loading}
-                className="flex items-center justify-center gap-2 rounded-xl bg-[#14E1E6] px-6 py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={loading || !today}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#14E1E6] px-6 py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading ? (
                   <>
@@ -427,6 +472,6 @@ export default function AddMemberPage() {
           </form>
         )}
       </div>
-    </div>
+    </main>
   );
 }
