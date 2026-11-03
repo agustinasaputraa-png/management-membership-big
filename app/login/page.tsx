@@ -101,8 +101,6 @@ export default function LoginPage() {
             ADMIN ACCESS
           </p>
 
-          <h2 className="text-3xl font-bold tracking-tight">Welcome back</h2>
-
           <p className="mt-3 text-sm leading-6 text-gray-500">
             Sign in to access your membership management dashboard.
           </p>

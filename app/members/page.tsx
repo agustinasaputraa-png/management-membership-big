@@ -21,6 +21,7 @@ import {
 
 import Sidebar from "@/components/dashboard/Sidebar";
 import Header from "@/components/dashboard/Header";
+import DatePicker from "@/components/ui/DatePicker";
 import { supabase } from "@/lib/supabase";
 
 type Member = {
@@ -53,6 +54,16 @@ const WARNING_DAYS = 30;
 
 const inputClass =
   "mt-2 w-full rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-sm text-white outline-none focus:border-[#14E1E6]";
+
+function getLocalToday() {
+  const date = new Date();
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
 
 function mapDatabaseMember(row: DatabaseMember): Member {
   return {
@@ -170,7 +181,7 @@ export default function MembersPage() {
   }, []);
 
   useEffect(() => {
-    setToday(new Date().toISOString().slice(0, 10));
+    setToday(getLocalToday());
     void fetchMembers();
   }, [fetchMembers]);
 
@@ -226,13 +237,38 @@ export default function MembersPage() {
       return;
     }
 
-    if (editingMember.validUntil < editingMember.validFrom) {
-      setError("Tanggal berakhir harus setelah tanggal mulai.");
+    if (!editingMember.email.trim()) {
+      setError("Email member wajib diisi.");
+      return;
+    }
+
+    if (!editingMember.phone.trim()) {
+      setError("Nomor telepon wajib diisi.");
+      return;
+    }
+
+    if (!editingMember.dateOfBirth) {
+      setError("Tanggal lahir wajib diisi.");
+      return;
+    }
+
+    if (!editingMember.validFrom || !editingMember.validUntil) {
+      setError("Periode membership wajib diisi.");
+      return;
+    }
+
+    if (editingMember.dateOfBirth > today) {
+      setError("Tanggal lahir tidak boleh di masa depan.");
       return;
     }
 
     if (editingMember.dateOfBirth >= editingMember.validFrom) {
       setError("Tanggal lahir harus sebelum tanggal mulai membership.");
+      return;
+    }
+
+    if (editingMember.validUntil < editingMember.validFrom) {
+      setError("Tanggal berakhir harus setelah tanggal mulai.");
       return;
     }
 
@@ -333,13 +369,25 @@ export default function MembersPage() {
     }
   }
 
+  // UPDATE EDIT FORM
   function updateEditing(field: keyof Member, value: string) {
     if (!editingMember) return;
 
-    setEditingMember({
-      ...editingMember,
-      [field]: value,
+    setEditingMember((previous) => {
+      if (!previous) return previous;
+
+      return {
+        ...previous,
+        [field]: value,
+        ...(field === "validFrom" &&
+        previous.validUntil &&
+        previous.validUntil < value
+          ? { validUntil: "" }
+          : {}),
+      };
     });
+
+    setError("");
   }
 
   function resetFilters() {
@@ -461,7 +509,7 @@ export default function MembersPage() {
           </section>
 
           {/* MESSAGE */}
-          {error && (
+          {error && !editingMember && !deleteTarget && (
             <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
               <AlertCircle size={18} className="mt-0.5 shrink-0" />
               <span>{error}</span>
@@ -594,6 +642,7 @@ export default function MembersPage() {
                             <button
                               onClick={() => {
                                 setError("");
+                                setMessage("");
                                 setEditingMember({ ...member });
                               }}
                               title="Edit member"
@@ -605,6 +654,7 @@ export default function MembersPage() {
                             <button
                               onClick={() => {
                                 setError("");
+                                setMessage("");
                                 setDeleteTarget(member);
                               }}
                               title="Delete member"
@@ -683,7 +733,7 @@ export default function MembersPage() {
         </div>
       )}
 
-      {/* EDIT MODAL */}
+      {/* EDIT MEMBER MODAL */}
       {editingMember && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4">
           <form
@@ -691,14 +741,27 @@ export default function MembersPage() {
             className="my-8 w-full max-w-xl rounded-2xl border border-white/10 bg-[#1D1D1D] p-6"
           >
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Edit Member</h2>
-              <button type="button" onClick={() => setEditingMember(null)}>
+              <div>
+                <h2 className="text-lg font-bold">Edit Member</h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  Update member information and membership period.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingMember(null);
+                  setError("");
+                }}
+                disabled={loadingAction}
+              >
                 <X className="text-gray-400" />
               </button>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="text-sm text-gray-400">
+            <div className="grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2">
+              <label className="min-w-0 text-sm text-gray-400">
                 Full Name
                 <input
                   required
@@ -710,7 +773,7 @@ export default function MembersPage() {
                 />
               </label>
 
-              <label className="text-sm text-gray-400">
+              <label className="min-w-0 text-sm text-gray-400">
                 Email
                 <input
                   required
@@ -723,7 +786,7 @@ export default function MembersPage() {
                 />
               </label>
 
-              <label className="text-sm text-gray-400">
+              <label className="min-w-0 text-sm text-gray-400">
                 Phone
                 <input
                   required
@@ -735,59 +798,55 @@ export default function MembersPage() {
                 />
               </label>
 
-              <label className="text-sm text-gray-400">
-                Date of Birth
-                <input
-                  required
-                  type="date"
+              <div className="min-w-0">
+                <DatePicker
+                  label="Date of Birth"
                   value={editingMember.dateOfBirth}
-                  onChange={(event) =>
-                    updateEditing("dateOfBirth", event.target.value)
-                  }
-                  className={inputClass}
-                />
-              </label>
-
-              <label className="text-sm text-gray-400">
-                Valid From
-                <input
+                  onChange={(value) => updateEditing("dateOfBirth", value)}
+                  placeholder="Pilih tanggal lahir"
+                  maxDate={today || undefined}
                   required
-                  type="date"
+                />
+              </div>
+
+              <div className="min-w-0">
+                <DatePicker
+                  label="Valid From"
                   value={editingMember.validFrom}
-                  onChange={(event) =>
-                    updateEditing("validFrom", event.target.value)
-                  }
-                  className={inputClass}
-                />
-              </label>
-
-              <label className="text-sm text-gray-400">
-                Valid Until
-                <input
+                  onChange={(value) => updateEditing("validFrom", value)}
+                  placeholder="Pilih tanggal mulai"
                   required
-                  type="date"
-                  min={editingMember.validFrom}
-                  value={editingMember.validUntil}
-                  onChange={(event) =>
-                    updateEditing("validUntil", event.target.value)
-                  }
-                  className={inputClass}
                 />
-              </label>
+              </div>
+
+              <div className="min-w-0">
+                <DatePicker
+                  label="Valid Until"
+                  value={editingMember.validUntil}
+                  onChange={(value) => updateEditing("validUntil", value)}
+                  placeholder="Pilih tanggal berakhir"
+                  minDate={editingMember.validFrom || undefined}
+                  required
+                />
+              </div>
             </div>
 
             {error && (
-              <p className="mt-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-400">
+              <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+                <AlertCircle size={17} className="mt-0.5 shrink-0" />
                 {error}
-              </p>
+              </div>
             )}
 
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
-                onClick={() => setEditingMember(null)}
+                onClick={() => {
+                  setEditingMember(null);
+                  setError("");
+                }}
                 disabled={loadingAction}
-                className="rounded-xl border border-white/10 px-5 py-3 text-sm text-gray-300"
+                className="rounded-xl border border-white/10 px-5 py-3 text-sm text-gray-300 transition hover:bg-white/5 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -795,7 +854,7 @@ export default function MembersPage() {
               <button
                 type="submit"
                 disabled={loadingAction}
-                className="flex items-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
+                className="flex items-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0] disabled:opacity-50"
               >
                 {loadingAction && (
                   <LoaderCircle size={16} className="animate-spin" />
@@ -830,7 +889,10 @@ export default function MembersPage() {
 
             <div className="mt-6 flex justify-end gap-3">
               <button
-                onClick={() => setDeleteTarget(null)}
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setError("");
+                }}
                 disabled={loadingAction}
                 className="rounded-xl border border-white/10 px-4 py-2.5 text-sm"
               >

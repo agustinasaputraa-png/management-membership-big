@@ -19,6 +19,7 @@ import {
 import Sidebar from "@/components/dashboard/Sidebar";
 import Header from "@/components/dashboard/Header";
 import WhatsAppButton from "@/components/prospects/WhatsAppButton";
+import DatePicker from "@/components/ui/DatePicker";
 import { supabase } from "@/lib/supabase";
 
 type ProspectStatus = "NEW" | "FOLLOW_UP" | "INTERESTED" | "CONVERTED" | "LOST";
@@ -105,7 +106,10 @@ function getStatusStyle(status: ProspectStatus) {
 function formatDate(date: string) {
   if (!date) return "-";
 
-  return new Date(`${date}T00:00:00`).toLocaleDateString("id-ID", {
+  const [year, month, day] = date.split("-").map(Number);
+  const localDate = new Date(year, month - 1, day);
+
+  return localDate.toLocaleDateString("id-ID", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -201,6 +205,7 @@ export default function ProspectsPage() {
     (item) => item.status === "CONVERTED",
   ).length;
 
+  // OPEN ADD MODAL
   function openAddModal() {
     setEditingId(null);
     setForm(emptyForm);
@@ -208,6 +213,7 @@ export default function ProspectsPage() {
     setShowModal(true);
   }
 
+  // OPEN EDIT MODAL
   function openEditModal(prospect: Prospect) {
     setEditingId(prospect.id);
 
@@ -225,6 +231,7 @@ export default function ProspectsPage() {
     setShowModal(true);
   }
 
+  // CLOSE MODAL
   function closeModal() {
     if (saving) return;
 
@@ -772,20 +779,18 @@ export default function ProspectsPage() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="mb-2 block text-sm text-gray-400">
-                    Next Follow-up
-                  </label>
-                  <input
-                    type="date"
+                {/* CUSTOM DATE PICKER */}
+                <div className="min-w-0">
+                  <DatePicker
+                    label="Next Follow-up"
                     value={form.nextFollowUp}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        nextFollowUp: event.target.value,
-                      })
+                    onChange={(value) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        nextFollowUp: value,
+                      }))
                     }
-                    className={inputClass}
+                    placeholder="Pilih tanggal follow-up"
                   />
                 </div>
               </div>
@@ -816,7 +821,7 @@ export default function ProspectsPage() {
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="flex-1 rounded-xl border border-white/10 py-3 text-sm text-gray-300 transition hover:bg-white/5"
+                  className="flex-1 rounded-xl border border-white/10 py-3 text-sm text-gray-300 transition hover:bg-white/5 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -829,6 +834,7 @@ export default function ProspectsPage() {
                   {saving && (
                     <LoaderCircle size={17} className="animate-spin" />
                   )}
+
                   {saving
                     ? "Saving..."
                     : editingId
