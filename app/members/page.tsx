@@ -19,8 +19,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-import Sidebar from "@/components/dashboard/Sidebar";
-import Header from "@/components/dashboard/Header";
+import DashboardShell from "@/components/dashboard/DashboardShell";
 import DatePicker from "@/components/ui/DatePicker";
 import { supabase } from "@/lib/supabase";
 
@@ -396,287 +395,281 @@ export default function MembersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#151515] text-white">
-      <Sidebar />
+    <DashboardShell>
+      <div className="min-w-0 space-y-7 p-8">
+        {/* HEADER */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">All Members</h1>
+            <p className="mt-2 text-sm text-gray-500">
+              View and manage all registered membership accounts.
+            </p>
+          </div>
 
-      <main className="min-h-screen pl-64">
-        <Header />
+          <Link
+            href="/members/new"
+            className="flex items-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0]"
+          >
+            <UserPlus size={18} />
+            Add New Member
+          </Link>
+        </div>
 
-        <div className="space-y-7 p-8">
-          {/* HEADER */}
-          <div className="flex flex-wrap items-center justify-between gap-4">
+        {/* STATISTICS */}
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            {
+              label: "Total Members",
+              value: members.length,
+              color: "text-white",
+            },
+            {
+              label: "Active Members",
+              value: activeCount,
+              color: "text-[#14E1E6]",
+            },
+            {
+              label: "Expiring Soon",
+              value: expiringCount,
+              color: "text-yellow-400",
+            },
+            {
+              label: "Expired Members",
+              value: expiredCount,
+              color: "text-red-400",
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5"
+            >
+              <p className="text-sm text-gray-500">{item.label}</p>
+              <p className={`mt-3 text-3xl font-bold ${item.color}`}>
+                {loaded ? item.value.toLocaleString("id-ID") : "..."}
+              </p>
+            </div>
+          ))}
+        </section>
+
+        {/* SEARCH AND FILTER */}
+        <section className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5">
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <div className="relative flex-1">
+              <Search
+                size={19}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
+              />
+
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search name, email, phone, or membership number..."
+                className="w-full rounded-xl border border-white/10 bg-[#202020] py-3 pl-12 pr-4 text-sm outline-none focus:border-[#14E1E6]"
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Filter size={18} className="text-gray-500" />
+
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-sm text-white outline-none focus:border-[#14E1E6]"
+              >
+                <option value="ALL">All Status</option>
+                <option value="ACTIVE">Active</option>
+                <option value="EXPIRING_SOON">Expiring Soon</option>
+                <option value="EXPIRED">Expired</option>
+              </select>
+
+              <button
+                onClick={resetFilters}
+                title="Reset filter"
+                className="rounded-xl border border-white/10 p-3 text-gray-400 hover:bg-white/5"
+              >
+                <RefreshCw size={17} />
+              </button>
+
+              <button
+                onClick={() => void fetchMembers()}
+                disabled={!loaded}
+                title="Refresh members"
+                className="rounded-xl border border-white/10 p-3 text-gray-400 hover:border-[#14E1E6] hover:text-[#14E1E6] disabled:opacity-50"
+              >
+                <RefreshCw size={17} />
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* MESSAGE */}
+        {error && !editingMember && !deleteTarget && (
+          <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
+            <AlertCircle size={18} className="mt-0.5 shrink-0" />
+            <span>{error}</span>
+            <button className="ml-auto" onClick={() => setError("")}>
+              <X size={17} />
+            </button>
+          </div>
+        )}
+
+        {message && (
+          <div className="flex items-center justify-between rounded-xl border border-[#14E1E6]/20 bg-[#14E1E6]/5 p-4 text-sm text-[#14E1E6]">
+            {message}
+            <button onClick={() => setMessage("")}>
+              <X size={17} />
+            </button>
+          </div>
+        )}
+
+        {/* MEMBER TABLE */}
+        <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1D1D1D]">
+          <div className="flex items-center justify-between border-b border-white/10 p-5">
             <div>
-              <h1 className="text-2xl font-bold">All Members</h1>
-              <p className="mt-2 text-sm text-gray-500">
-                View and manage all registered membership accounts.
+              <h2 className="font-semibold">Member Directory</h2>
+              <p className="mt-1 text-xs text-gray-500">
+                Showing {filteredMembers.length} of {members.length} members
               </p>
             </div>
 
-            <Link
-              href="/members/new"
-              className="flex items-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#0fcbd0]"
-            >
-              <UserPlus size={18} />
-              Add New Member
-            </Link>
+            <Users size={20} className="text-[#14E1E6]" />
           </div>
 
-          {/* STATISTICS */}
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              {
-                label: "Total Members",
-                value: members.length,
-                color: "text-white",
-              },
-              {
-                label: "Active Members",
-                value: activeCount,
-                color: "text-[#14E1E6]",
-              },
-              {
-                label: "Expiring Soon",
-                value: expiringCount,
-                color: "text-yellow-400",
-              },
-              {
-                label: "Expired Members",
-                value: expiredCount,
-                color: "text-red-400",
-              },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5"
-              >
-                <p className="text-sm text-gray-500">{item.label}</p>
-                <p className={`mt-3 text-3xl font-bold ${item.color}`}>
-                  {loaded ? item.value.toLocaleString("id-ID") : "..."}
-                </p>
-              </div>
-            ))}
-          </section>
+          {!loaded ? (
+            <div className="p-12 text-center text-sm text-gray-500">
+              <LoaderCircle size={24} className="mx-auto mb-3 animate-spin" />
+              Loading members from Supabase...
+            </div>
+          ) : error && members.length === 0 ? (
+            <div className="p-12 text-center text-sm text-red-400">
+              Failed to load members. Check your database permissions.
+            </div>
+          ) : filteredMembers.length === 0 ? (
+            <div className="p-12 text-center">
+              <Users size={35} className="mx-auto text-gray-600" />
+              <h3 className="mt-4 font-semibold">No members found</h3>
 
-          {/* SEARCH AND FILTER */}
-          <section className="rounded-2xl border border-white/10 bg-[#1D1D1D] p-5">
-            <div className="flex flex-col gap-4 lg:flex-row">
-              <div className="relative flex-1">
-                <Search
-                  size={19}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
-                />
+              <p className="mt-2 text-sm text-gray-500">
+                {members.length === 0
+                  ? "You have not registered any members yet."
+                  : "Try changing your search or filter."}
+              </p>
 
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search name, email, phone, or membership number..."
-                  className="w-full rounded-xl border border-white/10 bg-[#202020] py-3 pl-12 pr-4 text-sm outline-none focus:border-[#14E1E6]"
-                />
-              </div>
-
-              <div className="flex items-center gap-3">
-                <Filter size={18} className="text-gray-500" />
-
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value)}
-                  className="rounded-xl border border-white/10 bg-[#202020] px-4 py-3 text-sm text-white outline-none focus:border-[#14E1E6]"
+              {members.length === 0 && (
+                <Link
+                  href="/members/new"
+                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black"
                 >
-                  <option value="ALL">All Status</option>
-                  <option value="ACTIVE">Active</option>
-                  <option value="EXPIRING_SOON">Expiring Soon</option>
-                  <option value="EXPIRED">Expired</option>
-                </select>
-
-                <button
-                  onClick={resetFilters}
-                  title="Reset filter"
-                  className="rounded-xl border border-white/10 p-3 text-gray-400 hover:bg-white/5"
-                >
-                  <RefreshCw size={17} />
-                </button>
-
-                <button
-                  onClick={() => void fetchMembers()}
-                  disabled={!loaded}
-                  title="Refresh members"
-                  className="rounded-xl border border-white/10 p-3 text-gray-400 hover:border-[#14E1E6] hover:text-[#14E1E6] disabled:opacity-50"
-                >
-                  <RefreshCw size={17} />
-                </button>
-              </div>
+                  <UserPlus size={17} />
+                  Add First Member
+                </Link>
+              )}
             </div>
-          </section>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[950px] text-left">
+                <thead className="bg-[#252525] text-xs uppercase text-gray-500">
+                  <tr>
+                    <th className="px-5 py-4">Member</th>
+                    <th className="px-5 py-4">Membership ID</th>
+                    <th className="px-5 py-4">Phone</th>
+                    <th className="px-5 py-4">Valid Period</th>
+                    <th className="px-5 py-4">Status</th>
+                    <th className="px-5 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
 
-          {/* MESSAGE */}
-          {error && !editingMember && !deleteTarget && (
-            <div className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
-              <AlertCircle size={18} className="mt-0.5 shrink-0" />
-              <span>{error}</span>
-              <button className="ml-auto" onClick={() => setError("")}>
-                <X size={17} />
-              </button>
-            </div>
-          )}
+                <tbody className="divide-y divide-white/5">
+                  {filteredMembers.map((member) => (
+                    <tr
+                      key={member.id}
+                      className="transition hover:bg-white/[0.02]"
+                    >
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#14E1E6]/10 font-semibold text-[#14E1E6]">
+                            {member.name.charAt(0).toUpperCase()}
+                          </div>
 
-          {message && (
-            <div className="flex items-center justify-between rounded-xl border border-[#14E1E6]/20 bg-[#14E1E6]/5 p-4 text-sm text-[#14E1E6]">
-              {message}
-              <button onClick={() => setMessage("")}>
-                <X size={17} />
-              </button>
-            </div>
-          )}
+                          <div>
+                            <p className="text-sm font-semibold">
+                              {member.name}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {member.email}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
 
-          {/* MEMBER TABLE */}
-          <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#1D1D1D]">
-            <div className="flex items-center justify-between border-b border-white/10 p-5">
-              <div>
-                <h2 className="font-semibold">Member Directory</h2>
-                <p className="mt-1 text-xs text-gray-500">
-                  Showing {filteredMembers.length} of {members.length} members
-                </p>
-              </div>
+                      <td className="px-5 py-4 text-sm text-gray-300">
+                        {member.membershipNumber || "-"}
+                      </td>
 
-              <Users size={20} className="text-[#14E1E6]" />
-            </div>
+                      <td className="px-5 py-4 text-sm text-gray-400">
+                        {member.phone}
+                      </td>
 
-            {!loaded ? (
-              <div className="p-12 text-center text-sm text-gray-500">
-                <LoaderCircle size={24} className="mx-auto mb-3 animate-spin" />
-                Loading members from Supabase...
-              </div>
-            ) : error && members.length === 0 ? (
-              <div className="p-12 text-center text-sm text-red-400">
-                Failed to load members. Check your database permissions.
-              </div>
-            ) : filteredMembers.length === 0 ? (
-              <div className="p-12 text-center">
-                <Users size={35} className="mx-auto text-gray-600" />
-                <h3 className="mt-4 font-semibold">No members found</h3>
+                      <td className="px-5 py-4 text-xs text-gray-400">
+                        <p>{formatDate(member.validFrom)}</p>
+                        <p className="mt-1 text-gray-600">
+                          Until {formatDate(member.validUntil)}
+                        </p>
+                      </td>
 
-                <p className="mt-2 text-sm text-gray-500">
-                  {members.length === 0
-                    ? "You have not registered any members yet."
-                    : "Try changing your search or filter."}
-                </p>
+                      <td className="px-5 py-4">
+                        <StatusBadge
+                          status={getMemberStatus(member.validUntil, today)}
+                        />
+                      </td>
 
-                {members.length === 0 && (
-                  <Link
-                    href="/members/new"
-                    className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#14E1E6] px-5 py-3 text-sm font-semibold text-black"
-                  >
-                    <UserPlus size={17} />
-                    Add First Member
-                  </Link>
-                )}
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[950px] text-left">
-                  <thead className="bg-[#252525] text-xs uppercase text-gray-500">
-                    <tr>
-                      <th className="px-5 py-4">Member</th>
-                      <th className="px-5 py-4">Membership ID</th>
-                      <th className="px-5 py-4">Phone</th>
-                      <th className="px-5 py-4">Valid Period</th>
-                      <th className="px-5 py-4">Status</th>
-                      <th className="px-5 py-4 text-right">Actions</th>
+                      <td className="px-5 py-4">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setSelectedMember(member)}
+                            title="View details"
+                            className="rounded-lg border border-white/10 p-2 text-gray-400 hover:border-[#14E1E6] hover:text-[#14E1E6]"
+                          >
+                            <Eye size={16} />
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setError("");
+                              setMessage("");
+                              setEditingMember({ ...member });
+                            }}
+                            title="Edit member"
+                            className="rounded-lg border border-white/10 p-2 text-gray-400 hover:border-yellow-400 hover:text-yellow-400"
+                          >
+                            <Pencil size={16} />
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setError("");
+                              setMessage("");
+                              setDeleteTarget(member);
+                            }}
+                            title="Delete member"
+                            className="rounded-lg border border-white/10 p-2 text-gray-400 hover:border-red-400 hover:text-red-400"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-white/5">
-                    {filteredMembers.map((member) => (
-                      <tr
-                        key={member.id}
-                        className="transition hover:bg-white/[0.02]"
-                      >
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#14E1E6]/10 font-semibold text-[#14E1E6]">
-                              {member.name.charAt(0).toUpperCase()}
-                            </div>
-
-                            <div>
-                              <p className="text-sm font-semibold">
-                                {member.name}
-                              </p>
-                              <p className="mt-1 text-xs text-gray-500">
-                                {member.email}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="px-5 py-4 text-sm text-gray-300">
-                          {member.membershipNumber || "-"}
-                        </td>
-
-                        <td className="px-5 py-4 text-sm text-gray-400">
-                          {member.phone}
-                        </td>
-
-                        <td className="px-5 py-4 text-xs text-gray-400">
-                          <p>{formatDate(member.validFrom)}</p>
-                          <p className="mt-1 text-gray-600">
-                            Until {formatDate(member.validUntil)}
-                          </p>
-                        </td>
-
-                        <td className="px-5 py-4">
-                          <StatusBadge
-                            status={getMemberStatus(member.validUntil, today)}
-                          />
-                        </td>
-
-                        <td className="px-5 py-4">
-                          <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => setSelectedMember(member)}
-                              title="View details"
-                              className="rounded-lg border border-white/10 p-2 text-gray-400 hover:border-[#14E1E6] hover:text-[#14E1E6]"
-                            >
-                              <Eye size={16} />
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                setError("");
-                                setMessage("");
-                                setEditingMember({ ...member });
-                              }}
-                              title="Edit member"
-                              className="rounded-lg border border-white/10 p-2 text-gray-400 hover:border-yellow-400 hover:text-yellow-400"
-                            >
-                              <Pencil size={16} />
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                setError("");
-                                setMessage("");
-                                setDeleteTarget(member);
-                              }}
-                              title="Delete member"
-                              className="rounded-lg border border-white/10 p-2 text-gray-400 hover:border-red-400 hover:text-red-400"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </div>
-      </main>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
 
       {/* MEMBER DETAIL MODAL */}
       {selectedMember && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#1D1D1D] p-6">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold">Member Details</h2>
@@ -735,7 +728,7 @@ export default function MembersPage() {
 
       {/* EDIT MEMBER MODAL */}
       {editingMember && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/70 p-4">
           <form
             onSubmit={handleEdit}
             className="my-8 w-full max-w-xl rounded-2xl border border-white/10 bg-[#1D1D1D] p-6"
@@ -868,7 +861,7 @@ export default function MembersPage() {
 
       {/* DELETE CONFIRMATION */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#1D1D1D] p-6">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-400">
               <Trash2 size={22} />
@@ -913,6 +906,6 @@ export default function MembersPage() {
           </div>
         </div>
       )}
-    </div>
+    </DashboardShell>
   );
 }
