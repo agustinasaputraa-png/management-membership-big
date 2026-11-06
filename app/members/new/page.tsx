@@ -14,16 +14,16 @@ import {
   CheckCircle2,
   Users,
   LoaderCircle,
+  CalendarDays,
 } from "lucide-react";
 
-import DatePicker from "@/components/ui/DatePicker";
 import { supabase } from "@/lib/supabase";
 
 type Member = {
   id: string;
   membership_number: string;
   name: string;
-  email: string;
+  email: string | null;
   phone: string;
   date_of_birth: string;
   valid_from: string;
@@ -54,11 +54,101 @@ const inputClass =
 
 const labelClass = "block text-sm font-medium text-gray-300";
 
+/**
+ * Menerima format DD/MM/YYYY atau YYYY-MM-DD.
+ * Mengembalikan YYYY-MM-DD untuk disimpan ke Supabase.
+ */
+function parseDateInput(input: string): string | null {
+  const value = input.trim();
+  let year = 0;
+  let month = 0;
+  let day = 0;
+
+  const dmy = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const ymd = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (dmy) {
+    day = Number(dmy[1]);
+    month = Number(dmy[2]);
+    year = Number(dmy[3]);
+  } else if (ymd) {
+    year = Number(ymd[1]);
+    month = Number(ymd[2]);
+    day = Number(ymd[3]);
+  } else {
+    return null;
+  }
+
+  if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  // Validasi kalender agar tanggal seperti 31/02/2026 ditolak.
+  const date = new Date(year, month - 1, day);
+
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 function generateMembershipNumber() {
   const year = new Date().getFullYear();
   const random = Math.floor(100000 + Math.random() * 900000);
 
   return `MBR-${year}-${random}`;
+}
+
+function DateTextField({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder = "DD/MM/YYYY",
+  hint = "Format: DD/MM/YYYY",
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  hint?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <label htmlFor={id} className={labelClass}>
+        {label} *
+      </label>
+
+      <div className="relative">
+        <CalendarDays
+          className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
+          size={18}
+        />
+        <input
+          id={id}
+          required
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          aria-describedby={`${id}-hint`}
+          className={`${inputClass} pl-11`}
+        />
+      </div>
+
+      <p id={`${id}-hint`} className="mt-2 text-xs text-gray-600">
+        {hint}
+      </p>
+    </div>
+  );
 }
 
 export default function AddMemberPage() {
@@ -72,11 +162,9 @@ export default function AddMemberPage() {
   const [success, setSuccess] = useState(false);
   const [createdMember, setCreatedMember] = useState<Member | null>(null);
 
-  // Mengambil tanggal lokal hanya di browser setelah mount.
-  // Ini mencegah error unstable new Date() saat prerender Next.js.
+  // Ambil tanggal lokal setelah halaman ter-mount agar aman untuk prerender.
   useEffect(() => {
     const date = new Date();
-
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
@@ -88,37 +176,24 @@ export default function AddMemberPage() {
     setForm((prev) => ({
       ...prev,
       [name]: value,
-
-      // Jika tanggal mulai digeser melewati tanggal akhir,
-      // kosongkan tanggal akhir agar user memilih ulang.
-      ...(name === "validFrom" && prev.validUntil && prev.validUntil < value
-        ? { validUntil: "" }
-        : {}),
     }));
 
     setError("");
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setError("");
 
     if (loading) return;
 
-    // Pastikan tanggal browser sudah tersedia.
     if (!today) {
       setError("Sedang memuat tanggal. Silakan coba kembali.");
       return;
     }
 
-    // Validasi data wajib.
     if (!form.name.trim()) {
       setError("Nama member wajib diisi.");
-      return;
-    }
-
-    if (!form.email.trim()) {
-      setError("Email member wajib diisi.");
       return;
     }
 
@@ -127,24 +202,28 @@ export default function AddMemberPage() {
       return;
     }
 
-    if (!form.dateOfBirth || !form.validFrom || !form.validUntil) {
-      setError("Semua tanggal wajib diisi.");
+    const dateOfBirth = parseDateInput(form.dateOfBirth);
+    const validFrom = parseDateInput(form.validFrom);
+    const validUntil = parseDateInput(form.validUntil);
+
+    if (!dateOfBirth || !validFrom || !validUntil) {
+      setError(
+        "Format tanggal tidak valid. Gunakan DD/MM/YYYY atau YYYY-MM-DD.",
+      );
       return;
     }
 
-    // Validasi tanggal lahir.
-    if (form.dateOfBirth > today) {
+    if (dateOfBirth > today) {
       setError("Tanggal lahir tidak boleh di masa depan.");
       return;
     }
 
-    if (form.dateOfBirth >= form.validFrom) {
+    if (dateOfBirth >= validFrom) {
       setError("Tanggal lahir harus sebelum tanggal mulai membership.");
       return;
     }
 
-    // Validasi masa membership.
-    if (form.validUntil < form.validFrom) {
+    if (validUntil < validFrom) {
       setError("Tanggal berakhir tidak boleh sebelum tanggal mulai.");
       return;
     }
@@ -152,7 +231,6 @@ export default function AddMemberPage() {
     setLoading(true);
 
     try {
-      // Periksa autentikasi admin.
       const {
         data: { user },
         error: authError,
@@ -166,14 +244,13 @@ export default function AddMemberPage() {
       const memberData = {
         membership_number: generateMembershipNumber(),
         name: form.name.trim(),
-        email: form.email.trim().toLowerCase(),
+        email: form.email.trim() ? form.email.trim().toLowerCase() : null,
         phone: form.phone.trim(),
-        date_of_birth: form.dateOfBirth,
-        valid_from: form.validFrom,
-        valid_until: form.validUntil,
+        date_of_birth: dateOfBirth,
+        valid_from: validFrom,
+        valid_until: validUntil,
       };
 
-      // Simpan member ke Supabase.
       const { data, error: insertError } = await supabase
         .from("members")
         .insert([memberData])
@@ -200,7 +277,6 @@ export default function AddMemberPage() {
       setSuccess(true);
     } catch (err) {
       console.error("CREATE MEMBER ERROR:", err);
-
       setError("Terjadi kesalahan saat menyimpan data. Silakan coba kembali.");
     } finally {
       setLoading(false);
@@ -217,7 +293,6 @@ export default function AddMemberPage() {
   return (
     <main className="min-h-screen w-full overflow-x-hidden bg-[#151515] p-4 text-white sm:p-6 md:p-10">
       <div className="mx-auto w-full min-w-0 max-w-4xl">
-        {/* Back Navigation */}
         <Link
           href="/members"
           className="mb-6 inline-flex min-h-11 items-center gap-2 text-sm text-gray-400 transition hover:text-[#14E1E6]"
@@ -226,7 +301,6 @@ export default function AddMemberPage() {
           Back to All Members
         </Link>
 
-        {/* Page Header */}
         <div className="mb-8">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-[#14E1E6]/10 text-[#14E1E6]">
             <UserPlus size={24} />
@@ -239,7 +313,6 @@ export default function AddMemberPage() {
           </p>
         </div>
 
-        {/* Success State */}
         {success && createdMember ? (
           <section className="rounded-2xl border border-[#14E1E6]/20 bg-[#1D1D1D] p-5 sm:p-8">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#14E1E6]/10 text-[#14E1E6]">
@@ -263,11 +336,13 @@ export default function AddMemberPage() {
 
               <div className="mt-5 space-y-3 break-words text-sm">
                 <p>{createdMember.name}</p>
-
-                <p className="text-gray-400">{createdMember.email}</p>
-
+                {createdMember.email && (
+                  <p className="text-gray-400">{createdMember.email}</p>
+                )}
                 <p className="text-gray-400">{createdMember.phone}</p>
-
+                <p className="text-gray-400">
+                  Date of Birth: {createdMember.date_of_birth}
+                </p>
                 <p className="text-gray-400">
                   Valid: {createdMember.valid_from} —{" "}
                   {createdMember.valid_until}
@@ -295,33 +370,27 @@ export default function AddMemberPage() {
             </div>
           </section>
         ) : (
-          /* Create Member Form */
           <form
             onSubmit={handleSubmit}
             className="box-border w-full min-w-0 rounded-2xl border border-white/10 bg-[#1D1D1D] p-4 sm:p-6 md:p-8"
           >
-            {/* Personal Information */}
             <div className="mb-6 border-b border-white/10 pb-5">
               <h2 className="font-semibold">Personal Information</h2>
-
               <p className="mt-1 text-xs text-gray-500">
                 Enter the member&apos;s personal details.
               </p>
             </div>
 
             <div className="grid min-w-0 grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
-              {/* Full Name */}
               <div className="min-w-0">
                 <label htmlFor="name" className={labelClass}>
                   Full Name *
                 </label>
-
                 <div className="relative">
                   <User
                     className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
                     size={18}
                   />
-
                   <input
                     id="name"
                     required
@@ -329,51 +398,48 @@ export default function AddMemberPage() {
                     type="text"
                     autoComplete="name"
                     value={form.name}
-                    onChange={(e) => updateField("name", e.target.value)}
+                    onChange={(event) =>
+                      updateField("name", event.target.value)
+                    }
                     placeholder="Enter full name"
                     className={`${inputClass} pl-11`}
                   />
                 </div>
               </div>
 
-              {/* Email */}
               <div className="min-w-0">
                 <label htmlFor="email" className={labelClass}>
-                  Email Address *
+                  Email Address (Optional)
                 </label>
-
                 <div className="relative">
                   <Mail
                     className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
                     size={18}
                   />
-
                   <input
                     id="email"
-                    required
-                    type="email"
+                    type="text"
                     name="email"
                     autoComplete="email"
                     value={form.email}
-                    onChange={(e) => updateField("email", e.target.value)}
-                    placeholder="example@email.com"
+                    onChange={(event) =>
+                      updateField("email", event.target.value)
+                    }
+                    placeholder="Email (opsional)"
                     className={`${inputClass} pl-11`}
                   />
                 </div>
               </div>
 
-              {/* Phone */}
               <div className="min-w-0">
                 <label htmlFor="phone" className={labelClass}>
                   Phone Number *
                 </label>
-
                 <div className="relative">
                   <Phone
                     className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
                     size={18}
                   />
-
                   <input
                     id="phone"
                     required
@@ -381,55 +447,49 @@ export default function AddMemberPage() {
                     name="phone"
                     autoComplete="tel"
                     value={form.phone}
-                    onChange={(e) => updateField("phone", e.target.value)}
+                    onChange={(event) =>
+                      updateField("phone", event.target.value)
+                    }
                     placeholder="081234567890"
                     className={`${inputClass} pl-11`}
                   />
                 </div>
               </div>
 
-              {/* Date of Birth */}
-              <DatePicker
+              <DateTextField
+                id="dateOfBirth"
                 label="Date of Birth"
                 value={form.dateOfBirth}
                 onChange={(value) => updateField("dateOfBirth", value)}
-                placeholder="Pilih tanggal lahir"
-                maxDate={today || undefined}
-                required
+                hint="Contoh: 06/11/1995"
               />
             </div>
 
-            {/* Membership Information */}
             <div className="mb-6 mt-9 border-b border-white/10 pb-5 sm:mt-10">
               <h2 className="font-semibold">Membership Information</h2>
-
               <p className="mt-1 text-xs text-gray-500">
                 Set the validity period of this membership.
               </p>
             </div>
 
             <div className="grid min-w-0 grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
-              {/* Valid From */}
-              <DatePicker
+              <DateTextField
+                id="validFrom"
                 label="Valid From"
                 value={form.validFrom}
                 onChange={(value) => updateField("validFrom", value)}
-                placeholder="Pilih tanggal mulai"
-                required
+                hint="Tanggal mulai membership"
               />
 
-              {/* Valid Until */}
-              <DatePicker
+              <DateTextField
+                id="validUntil"
                 label="Valid Until"
                 value={form.validUntil}
                 onChange={(value) => updateField("validUntil", value)}
-                placeholder="Pilih tanggal berakhir"
-                minDate={form.validFrom || undefined}
-                required
+                hint="Tanggal berakhir membership"
               />
             </div>
 
-            {/* Error Message */}
             {error && (
               <div
                 role="alert"
@@ -440,7 +500,6 @@ export default function AddMemberPage() {
               </div>
             )}
 
-            {/* Form Actions */}
             <div className="mt-8 flex flex-col-reverse justify-end gap-3 border-t border-white/10 pt-6 sm:mt-10 sm:flex-row">
               <button
                 type="button"
