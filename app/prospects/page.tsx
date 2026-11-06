@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 
 import DashboardShell from "@/components/dashboard/DashboardShell";
-import DatePicker from "@/components/ui/DatePicker";
 import WhatsAppButton from "@/components/prospects/WhatsAppButton";
 import { supabase } from "@/lib/supabase";
 
@@ -114,6 +113,49 @@ function formatDate(date: string) {
     month: "short",
     year: "numeric",
   });
+}
+
+/**
+ * Menerima DD/MM/YYYY atau YYYY-MM-DD.
+ * Menghasilkan YYYY-MM-DD untuk disimpan ke database.
+ */
+function parseDateInput(input: string): string | null {
+  const value = input.trim();
+  if (!value) return null;
+
+  let year = 0;
+  let month = 0;
+  let day = 0;
+
+  const dmy = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const ymd = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (dmy) {
+    day = Number(dmy[1]);
+    month = Number(dmy[2]);
+    year = Number(dmy[3]);
+  } else if (ymd) {
+    year = Number(ymd[1]);
+    month = Number(ymd[2]);
+    day = Number(ymd[3]);
+  } else {
+    return null;
+  }
+
+  if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 export default function ProspectsPage() {
@@ -262,6 +304,17 @@ export default function ProspectsPage() {
       return;
     }
 
+    const normalizedFollowUp = form.nextFollowUp.trim()
+      ? parseDateInput(form.nextFollowUp)
+      : null;
+
+    if (form.nextFollowUp.trim() && !normalizedFollowUp) {
+      setError(
+        "Format tanggal follow-up tidak valid. Gunakan DD/MM/YYYY atau YYYY-MM-DD.",
+      );
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -282,7 +335,7 @@ export default function ProspectsPage() {
         interest: form.interest.trim() || null,
         notes: form.notes.trim() || null,
         status: form.status,
-        next_follow_up: form.nextFollowUp || null,
+        next_follow_up: normalizedFollowUp,
         updated_at: new Date().toISOString(),
       };
 
@@ -745,7 +798,7 @@ export default function ProspectsPage() {
                   </label>
 
                   <input
-                    type="email"
+                    type="text"
                     value={form.email}
                     onChange={(event) =>
                       setForm((previous) => ({
@@ -803,19 +856,34 @@ export default function ProspectsPage() {
                   </select>
                 </div>
 
-                {/* DATE PICKER */}
+                {/* DATE INPUT - TEXT ONLY */}
                 <div>
-                  <DatePicker
-                    label="Next Follow-up"
-                    value={form.nextFollowUp}
-                    onChange={(value) =>
-                      setForm((previous) => ({
-                        ...previous,
-                        nextFollowUp: value,
-                      }))
-                    }
-                    placeholder="Pilih tanggal follow-up"
-                  />
+                  <label className="mb-2 block text-sm text-gray-400">
+                    Next Follow-up (Optional)
+                  </label>
+                  <div className="relative">
+                    <CalendarDays
+                      size={17}
+                      className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
+                    />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={form.nextFollowUp}
+                      onChange={(event) =>
+                        setForm((previous) => ({
+                          ...previous,
+                          nextFollowUp: event.target.value,
+                        }))
+                      }
+                      placeholder="DD/MM/YYYY"
+                      className={`${inputClass} pl-11`}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-gray-600">
+                    Contoh: 06/11/2026. Boleh dikosongkan.
+                  </p>
                 </div>
               </div>
 
