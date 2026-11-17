@@ -25,22 +25,36 @@ type Member = {
   id: string;
   membershipNumber: string;
   name: string;
-  email: string;
-  phone: string;
-  dateOfBirth: string;
-  validFrom: string;
-  validUntil: string;
+  email: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  address: string | null;
+  gender: string | null;
+  postalCode: string | null;
+  nationality: string | null;
+  identityNumber: string | null;
+  membershipStatus: string | null;
+  marketing: string | null;
 };
 
 type MemberRow = {
   id: string;
   membership_number: string;
   name: string;
-  email: string;
-  phone: string;
-  date_of_birth: string;
-  valid_from: string;
-  valid_until: string;
+  email: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  address: string | null;
+  gender: string | null;
+  postal_code: string | null;
+  nationality: string | null;
+  identity_number: string | null;
+  membership_status: string | null;
+  marketing: string | null;
 };
 
 function mapMember(row: MemberRow): Member {
@@ -53,10 +67,17 @@ function mapMember(row: MemberRow): Member {
     dateOfBirth: row.date_of_birth,
     validFrom: row.valid_from,
     validUntil: row.valid_until,
+    address: row.address,
+    gender: row.gender,
+    postalCode: row.postal_code,
+    nationality: row.nationality,
+    identityNumber: row.identity_number,
+    membershipStatus: row.membership_status,
+    marketing: row.marketing,
   };
 }
 
-function formatDate(date: string): string {
+function formatDate(date: string | null): string {
   if (!date) return "-";
 
   return new Date(`${date}T00:00:00`).toLocaleDateString("id-ID", {
@@ -66,7 +87,8 @@ function formatDate(date: string): string {
   });
 }
 
-function getDaysExpired(validUntil: string, today: Date): number {
+function getDaysExpired(validUntil: string | null, today: Date): number {
+  if (!validUntil) return 0;
   const expiry = new Date(`${validUntil}T00:00:00`);
   return Math.max(
     0,
@@ -132,6 +154,8 @@ function DetailRow({
 export default function ExpiredMembersPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [today, setToday] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
@@ -158,7 +182,7 @@ export default function ExpiredMembersPage() {
       const { data, error: fetchError } = await supabase
         .from("members")
         .select(
-          "id, membership_number, name, email, phone, date_of_birth, valid_from, valid_until",
+          "id, membership_number, name, email, phone, date_of_birth, valid_from, valid_until, address, gender, postal_code, nationality, identity_number, membership_status, marketing",
         )
         .order("valid_until", { ascending: true });
 
@@ -189,8 +213,11 @@ export default function ExpiredMembersPage() {
     if (!today) return [];
 
     return members.filter((member) => {
+      if (!member.validUntil) return false;
       const expiry = new Date(`${member.validUntil}T00:00:00`);
-      return expiry.getTime() < today.getTime();
+      return (
+        !Number.isNaN(expiry.getTime()) && expiry.getTime() < today.getTime()
+      );
     });
   }, [members, today]);
 
@@ -205,7 +232,14 @@ export default function ExpiredMembersPage() {
         member.name,
         member.email,
         member.phone,
-      ].some((value) => value.toLowerCase().includes(keyword));
+        member.address,
+        member.gender,
+        member.postalCode,
+        member.nationality,
+        member.identityNumber,
+        member.membershipStatus,
+        member.marketing,
+      ].some((value) => (value ?? "").toLowerCase().includes(keyword));
     });
   }, [expiredMembers, search]);
 
@@ -215,6 +249,21 @@ export default function ExpiredMembersPage() {
         0,
       )
     : 0;
+
+  const totalPages = Math.max(1, Math.ceil(filteredMembers.length / pageSize));
+
+  const paginatedMembers = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredMembers.slice(startIndex, startIndex + pageSize);
+  }, [filteredMembers, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   return (
     <main className="min-h-screen bg-[#151515] px-4 py-6 text-white sm:px-6 lg:px-10">
@@ -366,7 +415,7 @@ export default function ExpiredMembersPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredMembers.map((member) => {
+                  paginatedMembers.map((member) => {
                     const daysExpired = getDaysExpired(
                       member.validUntil,
                       today!,
@@ -382,11 +431,12 @@ export default function ExpiredMembersPage() {
                             {member.name}
                           </p>
                           <p className="mt-1 text-xs text-gray-500">
-                            {member.membershipNumber} · {member.email}
+                            {member.membershipNumber} ·{" "}
+                            {member.email || "No email"}
                           </p>
                         </td>
                         <td className="px-5 py-4 text-gray-400">
-                          {member.phone}
+                          {member.phone || "-"}
                         </td>
                         <td className="px-5 py-4 text-gray-400">
                           {formatDate(member.validFrom)}
@@ -414,15 +464,20 @@ export default function ExpiredMembersPage() {
                             >
                               <Eye size={17} />
                             </button>
-                            <a
-                              href={getWhatsAppLink(member.phone, member.name)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title="Contact via WhatsApp"
-                              className="rounded-lg border border-green-500/20 p-2 text-green-400 transition hover:bg-green-500/10"
-                            >
-                              <MessageCircle size={17} />
-                            </a>
+                            {member.phone && (
+                              <a
+                                href={getWhatsAppLink(
+                                  member.phone,
+                                  member.name,
+                                )}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Contact via WhatsApp"
+                                className="rounded-lg border border-green-500/20 p-2 text-green-400 transition hover:bg-green-500/10"
+                              >
+                                <MessageCircle size={17} />
+                              </a>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -433,12 +488,70 @@ export default function ExpiredMembersPage() {
             </table>
           </div>
 
-          <div className="flex flex-col justify-between gap-2 border-t border-white/10 px-5 py-4 text-xs text-gray-500 sm:flex-row sm:items-center">
-            <span>
-              Showing {filteredMembers.length} of {expiredMembers.length}{" "}
-              expired members
-            </span>
-            <span>Membership Management</span>
+          <div className="flex flex-col gap-4 border-t border-white/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs text-gray-500">
+              {filteredMembers.length === 0 ? (
+                "No members to display"
+              ) : (
+                <>
+                  Showing{" "}
+                  <span className="font-medium text-white">
+                    {(currentPage - 1) * pageSize + 1}
+                  </span>
+                  {"–"}
+                  <span className="font-medium text-white">
+                    {Math.min(currentPage * pageSize, filteredMembers.length)}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-medium text-white">
+                    {filteredMembers.length}
+                  </span>{" "}
+                  members
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={currentPage <= 1 || filteredMembers.length === 0}
+                className="rounded-lg border border-white/10 bg-[#151515] px-3 py-2 text-xs font-medium text-gray-300 transition hover:border-[#14E1E6]/40 hover:text-[#14E1E6] disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                Previous
+              </button>
+
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+                (page) => (
+                  <button
+                    key={page}
+                    type="button"
+                    onClick={() => setCurrentPage(page)}
+                    aria-current={currentPage === page ? "page" : undefined}
+                    className={`h-9 min-w-9 rounded-lg border px-3 text-xs font-semibold transition ${
+                      currentPage === page
+                        ? "border-[#14E1E6] bg-[#14E1E6] text-[#151515]"
+                        : "border-white/10 bg-[#151515] text-gray-400 hover:border-[#14E1E6]/40 hover:text-[#14E1E6]"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ),
+              )}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setCurrentPage((page) => Math.min(totalPages, page + 1))
+                }
+                disabled={
+                  currentPage >= totalPages || filteredMembers.length === 0
+                }
+                className="rounded-lg border border-white/10 bg-[#151515] px-3 py-2 text-xs font-medium text-gray-300 transition hover:border-[#14E1E6]/40 hover:text-[#14E1E6] disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </section>
       </div>
@@ -489,17 +602,52 @@ export default function ExpiredMembersPage() {
               <DetailRow
                 icon={<Mail size={17} />}
                 label="Email"
-                value={selectedMember.email}
+                value={selectedMember.email || "-"}
               />
               <DetailRow
                 icon={<Phone size={17} />}
                 label="Phone"
-                value={selectedMember.phone}
+                value={selectedMember.phone || "-"}
               />
               <DetailRow
                 icon={<CalendarDays size={17} />}
                 label="Date of Birth"
                 value={formatDate(selectedMember.dateOfBirth)}
+              />
+              <DetailRow
+                icon={<Users size={17} />}
+                label="Address"
+                value={selectedMember.address || "-"}
+              />
+              <DetailRow
+                icon={<Users size={17} />}
+                label="Gender"
+                value={selectedMember.gender || "-"}
+              />
+              <DetailRow
+                icon={<Users size={17} />}
+                label="Postal Code"
+                value={selectedMember.postalCode || "-"}
+              />
+              <DetailRow
+                icon={<Users size={17} />}
+                label="Nationality"
+                value={selectedMember.nationality || "-"}
+              />
+              <DetailRow
+                icon={<Users size={17} />}
+                label="Identity Number"
+                value={selectedMember.identityNumber || "-"}
+              />
+              <DetailRow
+                icon={<Users size={17} />}
+                label="Membership Status"
+                value={selectedMember.membershipStatus || "-"}
+              />
+              <DetailRow
+                icon={<Users size={17} />}
+                label="Marketing"
+                value={selectedMember.marketing || "-"}
               />
               <div className="my-4 border-t border-white/10" />
               <DetailRow
@@ -522,15 +670,20 @@ export default function ExpiredMembersPage() {
               />
             </div>
 
-            <a
-              href={getWhatsAppLink(selectedMember.phone, selectedMember.name)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-green-500 py-3 text-sm font-semibold text-white transition hover:bg-green-600"
-            >
-              <MessageCircle size={18} />
-              Contact via WhatsApp
-            </a>
+            {selectedMember.phone && (
+              <a
+                href={getWhatsAppLink(
+                  selectedMember.phone,
+                  selectedMember.name,
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-green-500 py-3 text-sm font-semibold text-white transition hover:bg-green-600"
+              >
+                <MessageCircle size={18} />
+                Contact via WhatsApp
+              </a>
+            )}
           </div>
         </div>
       )}

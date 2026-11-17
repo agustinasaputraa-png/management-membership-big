@@ -10,9 +10,6 @@ import {
   Pencil,
   Trash2,
   X,
-  CalendarDays,
-  Mail,
-  Phone,
   Filter,
   RefreshCw,
   LoaderCircle,
@@ -20,7 +17,6 @@ import {
 } from "lucide-react";
 
 import DashboardShell from "@/components/dashboard/DashboardShell";
-import DatePicker from "@/components/ui/DatePicker";
 import { supabase } from "@/lib/supabase";
 
 type Member = {
@@ -32,19 +28,35 @@ type Member = {
   dateOfBirth: string;
   validFrom: string;
   validUntil: string;
+  address: string;
+  gender: string;
+  postalCode: string;
+  nationality: string;
+  identityNumber: string;
+  membershipStatus: string;
+  marketing: string;
   createdAt?: string;
+  updatedAt?: string;
 };
 
 type DatabaseMember = {
   id: string;
   membership_number: string;
   name: string;
-  email: string;
-  phone: string;
-  date_of_birth: string;
-  valid_from: string;
-  valid_until: string;
+  email: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  address: string | null;
+  gender: string | null;
+  postal_code: string | null;
+  nationality: string | null;
+  identity_number: string | null;
+  membership_status: string | null;
+  marketing: string | null;
   created_at: string;
+  updated_at: string | null;
 };
 
 type Status = "ACTIVE" | "EXPIRING_SOON" | "EXPIRED";
@@ -69,12 +81,20 @@ function mapDatabaseMember(row: DatabaseMember): Member {
     id: row.id,
     membershipNumber: row.membership_number,
     name: row.name,
-    email: row.email,
-    phone: row.phone,
-    dateOfBirth: row.date_of_birth,
-    validFrom: row.valid_from,
-    validUntil: row.valid_until,
+    email: row.email ?? "",
+    phone: row.phone ?? "",
+    dateOfBirth: row.date_of_birth ?? "",
+    validFrom: row.valid_from ?? "",
+    validUntil: row.valid_until ?? "",
+    address: row.address ?? "",
+    gender: row.gender ?? "",
+    postalCode: row.postal_code ?? "",
+    nationality: row.nationality ?? "",
+    identityNumber: row.identity_number ?? "",
+    membershipStatus: row.membership_status ?? "",
+    marketing: row.marketing ?? "",
     createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined,
   };
 }
 
@@ -160,7 +180,7 @@ export default function MembersPage() {
       const { data, error: fetchError } = await supabase
         .from("members")
         .select(
-          "id, membership_number, name, email, phone, date_of_birth, valid_from, valid_until, created_at",
+          "id, membership_number, name, email, phone, date_of_birth, valid_from, valid_until, address, gender, postal_code, nationality, identity_number, membership_status, marketing, created_at, updated_at",
         )
         .order("created_at", { ascending: false });
 
@@ -201,7 +221,14 @@ export default function MembersPage() {
         member.name.toLowerCase().includes(keyword) ||
         member.email.toLowerCase().includes(keyword) ||
         member.phone.toLowerCase().includes(keyword) ||
-        member.membershipNumber.toLowerCase().includes(keyword);
+        member.membershipNumber.toLowerCase().includes(keyword) ||
+        member.address.toLowerCase().includes(keyword) ||
+        member.gender.toLowerCase().includes(keyword) ||
+        member.postalCode.toLowerCase().includes(keyword) ||
+        member.nationality.toLowerCase().includes(keyword) ||
+        member.identityNumber.toLowerCase().includes(keyword) ||
+        member.membershipStatus.toLowerCase().includes(keyword) ||
+        member.marketing.toLowerCase().includes(keyword);
 
       const matchesStatus =
         statusFilter === "ALL" || member.status === statusFilter;
@@ -236,39 +263,45 @@ export default function MembersPage() {
       return;
     }
 
-    if (!editingMember.email.trim()) {
-      setError("Email member wajib diisi.");
-      return;
-    }
-
-    if (!editingMember.phone.trim()) {
-      setError("Nomor telepon wajib diisi.");
-      return;
-    }
-
-    if (!editingMember.dateOfBirth) {
-      setError("Tanggal lahir wajib diisi.");
-      return;
-    }
-
-    if (!editingMember.validFrom || !editingMember.validUntil) {
-      setError("Periode membership wajib diisi.");
-      return;
-    }
-
-    if (editingMember.dateOfBirth > today) {
+    if (
+      editingMember.dateOfBirth &&
+      today &&
+      editingMember.dateOfBirth > today
+    ) {
       setError("Tanggal lahir tidak boleh di masa depan.");
       return;
     }
 
-    if (editingMember.dateOfBirth >= editingMember.validFrom) {
+    if (
+      editingMember.dateOfBirth &&
+      editingMember.validFrom &&
+      editingMember.dateOfBirth >= editingMember.validFrom
+    ) {
       setError("Tanggal lahir harus sebelum tanggal mulai membership.");
       return;
     }
 
-    if (editingMember.validUntil < editingMember.validFrom) {
+    if (
+      editingMember.validFrom &&
+      editingMember.validUntil &&
+      editingMember.validUntil < editingMember.validFrom
+    ) {
       setError("Tanggal berakhir harus setelah tanggal mulai.");
       return;
+    }
+
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    for (const [label, value] of [
+      ["Tanggal lahir", editingMember.dateOfBirth],
+      ["Tanggal mulai", editingMember.validFrom],
+      ["Tanggal berakhir", editingMember.validUntil],
+    ] as const) {
+      if (value && !datePattern.test(value)) {
+        setError(
+          `${label} harus menggunakan format YYYY-MM-DD atau dikosongkan.`,
+        );
+        return;
+      }
     }
 
     setLoadingAction(true);
@@ -285,12 +318,23 @@ export default function MembersPage() {
       }
 
       const updateData = {
+        membership_number: editingMember.membershipNumber.trim(),
         name: editingMember.name.trim(),
-        email: editingMember.email.trim().toLowerCase(),
-        phone: editingMember.phone.trim(),
-        date_of_birth: editingMember.dateOfBirth,
-        valid_from: editingMember.validFrom,
-        valid_until: editingMember.validUntil,
+        email: editingMember.email.trim()
+          ? editingMember.email.trim().toLowerCase()
+          : null,
+        phone: editingMember.phone.trim() || null,
+        date_of_birth: editingMember.dateOfBirth || null,
+        valid_from: editingMember.validFrom || null,
+        valid_until: editingMember.validUntil || null,
+        address: editingMember.address.trim() || null,
+        gender: editingMember.gender.trim() || null,
+        postal_code: editingMember.postalCode.trim() || null,
+        nationality: editingMember.nationality.trim() || null,
+        identity_number: editingMember.identityNumber.trim() || null,
+        membership_status: editingMember.membershipStatus.trim() || null,
+        marketing: editingMember.marketing.trim() || null,
+        updated_at: new Date().toISOString(),
       };
 
       const { data: updatedMember, error: updateError } = await supabase
@@ -463,7 +507,7 @@ export default function MembersPage() {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search name, email, phone, or membership number..."
+                placeholder="Cari nama, email, telepon, nomor member, alamat, atau identitas..."
                 className="w-full rounded-xl border border-white/10 bg-[#202020] py-3 pl-12 pr-4 text-sm outline-none focus:border-[#14E1E6]"
               />
             </div>
@@ -691,35 +735,35 @@ export default function MembersPage() {
               </div>
             </div>
 
-            <div className="mt-6 space-y-4 text-sm">
-              <p className="flex items-center gap-3 text-gray-300">
-                <Mail size={17} className="text-gray-500" />
-                {selectedMember.email}
-              </p>
-
-              <p className="flex items-center gap-3 text-gray-300">
-                <Phone size={17} className="text-gray-500" />
-                {selectedMember.phone}
-              </p>
-
-              <p className="flex items-center gap-3 text-gray-300">
-                <CalendarDays size={17} className="text-gray-500" />
-                Birth: {formatDate(selectedMember.dateOfBirth)}
-              </p>
-
-              <div className="rounded-xl bg-[#252525] p-4">
-                <p className="mb-3 text-xs text-gray-500">Membership Period</p>
-
-                <p>
-                  {formatDate(selectedMember.validFrom)} –{" "}
-                  {formatDate(selectedMember.validUntil)}
-                </p>
-
-                <div className="mt-3">
-                  <StatusBadge
-                    status={getMemberStatus(selectedMember.validUntil, today)}
-                  />
+            <div className="mt-6 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+              {[
+                ["Email", selectedMember.email],
+                ["Telepon", selectedMember.phone],
+                ["Tanggal lahir", formatDate(selectedMember.dateOfBirth)],
+                ["Gender", selectedMember.gender],
+                ["Alamat", selectedMember.address],
+                ["Kode pos", selectedMember.postalCode],
+                ["Kewarganegaraan", selectedMember.nationality],
+                ["Nomor identitas", selectedMember.identityNumber],
+                ["Membership status", selectedMember.membershipStatus],
+                ["Marketing", selectedMember.marketing],
+                ["Valid from", formatDate(selectedMember.validFrom)],
+                ["Valid until", formatDate(selectedMember.validUntil)],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="min-w-0 rounded-xl bg-[#252525] p-3"
+                >
+                  <p className="text-xs text-gray-500">{label}</p>
+                  <p className="mt-1 break-words text-gray-200">
+                    {value || "-"}
+                  </p>
                 </div>
+              ))}
+              <div className="sm:col-span-2">
+                <StatusBadge
+                  status={getMemberStatus(selectedMember.validUntil, today)}
+                />
               </div>
             </div>
           </div>
@@ -754,74 +798,54 @@ export default function MembersPage() {
             </div>
 
             <div className="grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2">
-              <label className="min-w-0 text-sm text-gray-400">
-                Full Name
-                <input
-                  required
-                  value={editingMember.name}
+              {(
+                [
+                  ["membershipNumber", "Membership Number"],
+                  ["name", "Full Name"],
+                  ["email", "Email"],
+                  ["phone", "Phone"],
+                  ["dateOfBirth", "Date of Birth (YYYY-MM-DD)"],
+                  ["validFrom", "Valid From (YYYY-MM-DD)"],
+                  ["validUntil", "Valid Until (YYYY-MM-DD)"],
+                  ["gender", "Gender"],
+                  ["postalCode", "Postal Code"],
+                  ["nationality", "Nationality"],
+                  ["identityNumber", "Identity Number"],
+                  ["membershipStatus", "Membership Status"],
+                  ["marketing", "Marketing"],
+                ] as const
+              ).map(([field, label]) => (
+                <label key={field} className="min-w-0 text-sm text-gray-400">
+                  {label}
+                  <input
+                    type={field === "email" ? "email" : "text"}
+                    value={editingMember[field]}
+                    onChange={(event) =>
+                      updateEditing(field, event.target.value)
+                    }
+                    placeholder={
+                      field.startsWith("valid") || field === "dateOfBirth"
+                        ? "YYYY-MM-DD (boleh kosong)"
+                        : `${label} (boleh kosong)`
+                    }
+                    className={inputClass}
+                    required={field === "name" || field === "membershipNumber"}
+                  />
+                </label>
+              ))}
+
+              <label className="min-w-0 text-sm text-gray-400 sm:col-span-2">
+                Address
+                <textarea
+                  value={editingMember.address}
                   onChange={(event) =>
-                    updateEditing("name", event.target.value)
+                    updateEditing("address", event.target.value)
                   }
+                  placeholder="Alamat (boleh kosong)"
+                  rows={3}
                   className={inputClass}
                 />
               </label>
-
-              <label className="min-w-0 text-sm text-gray-400">
-                Email
-                <input
-                  required
-                  type="email"
-                  value={editingMember.email}
-                  onChange={(event) =>
-                    updateEditing("email", event.target.value)
-                  }
-                  className={inputClass}
-                />
-              </label>
-
-              <label className="min-w-0 text-sm text-gray-400">
-                Phone
-                <input
-                  required
-                  value={editingMember.phone}
-                  onChange={(event) =>
-                    updateEditing("phone", event.target.value)
-                  }
-                  className={inputClass}
-                />
-              </label>
-
-              <div className="min-w-0">
-                <DatePicker
-                  label="Date of Birth"
-                  value={editingMember.dateOfBirth}
-                  onChange={(value) => updateEditing("dateOfBirth", value)}
-                  placeholder="Pilih tanggal lahir"
-                  maxDate={today || undefined}
-                  required
-                />
-              </div>
-
-              <div className="min-w-0">
-                <DatePicker
-                  label="Valid From"
-                  value={editingMember.validFrom}
-                  onChange={(value) => updateEditing("validFrom", value)}
-                  placeholder="Pilih tanggal mulai"
-                  required
-                />
-              </div>
-
-              <div className="min-w-0">
-                <DatePicker
-                  label="Valid Until"
-                  value={editingMember.validUntil}
-                  onChange={(value) => updateEditing("validUntil", value)}
-                  placeholder="Pilih tanggal berakhir"
-                  minDate={editingMember.validFrom || undefined}
-                  required
-                />
-              </div>
             </div>
 
             {error && (

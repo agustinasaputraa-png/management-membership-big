@@ -50,7 +50,7 @@ type ProspectRow = {
 
 type MemberRow = {
   id: string;
-  valid_until: string;
+  valid_until: string | null;
 };
 
 const WARNING_DAYS = 30;
@@ -79,10 +79,20 @@ function getLocalDateString() {
   return `${year}-${month}-${day}`;
 }
 
-function getDaysRemaining(validUntil: string, today: string) {
+function getDaysRemaining(
+  validUntil: string | null,
+  today: string,
+): number | null {
+  if (!validUntil || !today) return null;
+
   const expiry = new Date(`${validUntil}T00:00:00`);
   const current = new Date(`${today}T00:00:00`);
-  return Math.ceil((expiry.getTime() - current.getTime()) / 86400000);
+
+  if (Number.isNaN(expiry.getTime()) || Number.isNaN(current.getTime())) {
+    return null;
+  }
+
+  return Math.round((expiry.getTime() - current.getTime()) / 86400000);
 }
 
 function formatFollowUpDate(date: string) {
@@ -194,7 +204,7 @@ export default function DashboardPage() {
     () =>
       members.filter((member) => {
         const days = getDaysRemaining(member.valid_until, today);
-        return days > WARNING_DAYS;
+        return days !== null && days > WARNING_DAYS;
       }).length,
     [members, today],
   );
@@ -203,7 +213,7 @@ export default function DashboardPage() {
     () =>
       members.filter((member) => {
         const days = getDaysRemaining(member.valid_until, today);
-        return days >= 0 && days <= WARNING_DAYS;
+        return days !== null && days >= 0 && days <= WARNING_DAYS;
       }).length,
     [members, today],
   );
@@ -212,8 +222,16 @@ export default function DashboardPage() {
     () =>
       members.filter((member) => {
         const days = getDaysRemaining(member.valid_until, today);
-        return days < 0;
+        return days !== null && days < 0;
       }).length,
+    [members, today],
+  );
+
+  const noExpiryDateMembers = useMemo(
+    () =>
+      members.filter(
+        (member) => getDaysRemaining(member.valid_until, today) === null,
+      ).length,
     [members, today],
   );
 
@@ -242,6 +260,7 @@ export default function DashboardPage() {
         { label: "Active", value: 0, color: "#14E1E6" },
         { label: "Expiring Soon", value: 0, color: "#FBBF24" },
         { label: "Expired", value: 0, color: "#F87171" },
+        { label: "No Expiry Date", value: 0, color: "#9CA3AF" },
       ];
     }
 
@@ -258,16 +277,22 @@ export default function DashboardPage() {
       },
       {
         label: "Expired",
-        value: Math.max(
-          0,
-          100 -
-            Math.round((activeMembers / totalMembers) * 100) -
-            Math.round((expiringMembers / totalMembers) * 100),
-        ),
+        value: Math.round((expiredMembers / totalMembers) * 100),
         color: "#F87171",
       },
+      {
+        label: "No Expiry Date",
+        value: Math.round((noExpiryDateMembers / totalMembers) * 100),
+        color: "#9CA3AF",
+      },
     ];
-  }, [activeMembers, expiringMembers, totalMembers]);
+  }, [
+    activeMembers,
+    expiringMembers,
+    expiredMembers,
+    noExpiryDateMembers,
+    totalMembers,
+  ]);
 
   return (
     <DashboardShell>

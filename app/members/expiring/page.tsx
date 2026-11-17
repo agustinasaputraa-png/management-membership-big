@@ -20,24 +20,42 @@ import { supabase } from "@/lib/supabase";
 
 type Member = {
   id: string;
-  membershipNumber: string;
+  membershipNumber: string | null;
   name: string;
-  email: string;
-  phone: string;
-  dateOfBirth: string;
-  validFrom: string;
-  validUntil: string;
+  email: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+  validFrom: string | null;
+  validUntil: string | null;
+  address: string | null;
+  gender: string | null;
+  postalCode: string | null;
+  nationality: string | null;
+  identityNumber: string | null;
+  membershipStatus: string | null;
+  marketing: boolean | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 type MemberRow = {
   id: string;
-  membership_number: string;
+  membership_number: string | null;
   name: string;
-  email: string;
-  phone: string;
-  date_of_birth: string;
-  valid_from: string;
-  valid_until: string;
+  email: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  address: string | null;
+  gender: string | null;
+  postal_code: string | null;
+  nationality: string | null;
+  identity_number: string | null;
+  membership_status: string | null;
+  marketing: boolean | null;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 function mapMember(row: MemberRow): Member {
@@ -50,25 +68,47 @@ function mapMember(row: MemberRow): Member {
     dateOfBirth: row.date_of_birth,
     validFrom: row.valid_from,
     validUntil: row.valid_until,
+    address: row.address,
+    gender: row.gender,
+    postalCode: row.postal_code,
+    nationality: row.nationality,
+    identityNumber: row.identity_number,
+    membershipStatus: row.membership_status,
+    marketing: row.marketing,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
-function getDaysRemaining(validUntil: string, today: Date) {
+function getDaysRemaining(
+  validUntil: string | null,
+  today: Date,
+): number | null {
+  if (!validUntil) return null;
+
   const expiry = new Date(`${validUntil}T00:00:00`);
-  return Math.ceil((expiry.getTime() - today.getTime()) / 86400000);
+  if (Number.isNaN(expiry.getTime())) return null;
+
+  const current = new Date(today);
+  current.setHours(0, 0, 0, 0);
+
+  return Math.round((expiry.getTime() - current.getTime()) / 86400000);
 }
 
-function formatDate(date: string) {
+function formatDate(date: string | null) {
   if (!date) return "-";
-  return new Date(`${date}T00:00:00`).toLocaleDateString("id-ID", {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "-";
+
+  return parsed.toLocaleDateString("id-ID", {
     day: "2-digit",
     month: "long",
     year: "numeric",
   });
 }
 
-function getWhatsAppLink(phone: string, name: string) {
-  let number = phone.replace(/\D/g, "");
+function getWhatsAppLink(phone: string | null, name: string) {
+  let number = (phone ?? "").replace(/\D/g, "");
   if (number.startsWith("0")) number = `62${number.slice(1)}`;
   if (!number.startsWith("62") && number.length > 0) number = `62${number}`;
 
@@ -106,7 +146,7 @@ export default function ExpiringMembersPage() {
       const { data, error: fetchError } = await supabase
         .from("members")
         .select(
-          "id, membership_number, name, email, phone, date_of_birth, valid_from, valid_until",
+          "id, membership_number, name, email, phone, date_of_birth, valid_from, valid_until, address, gender, postal_code, nationality, identity_number, membership_status, marketing, created_at, updated_at",
         )
         .order("valid_until", { ascending: true });
 
@@ -139,7 +179,7 @@ export default function ExpiringMembersPage() {
     return members
       .filter((member) => {
         const days = getDaysRemaining(member.validUntil, today);
-        return days >= 0 && days <= period;
+        return days !== null && days >= 0 && days <= period;
       })
       .filter((member) => {
         const keyword = search.toLowerCase().trim();
@@ -150,26 +190,32 @@ export default function ExpiringMembersPage() {
           member.name,
           member.email,
           member.phone,
-        ].some((value) => value.toLowerCase().includes(keyword));
+          member.address,
+          member.gender,
+          member.postalCode,
+          member.nationality,
+          member.identityNumber,
+          member.membershipStatus,
+        ].some((value) => (value ?? "").toLowerCase().includes(keyword));
       })
       .sort(
         (a, b) =>
-          getDaysRemaining(a.validUntil, today) -
-          getDaysRemaining(b.validUntil, today),
+          (getDaysRemaining(a.validUntil, today) ?? Number.MAX_SAFE_INTEGER) -
+          (getDaysRemaining(b.validUntil, today) ?? Number.MAX_SAFE_INTEGER),
       );
   }, [members, search, period, today]);
 
   const allExpiringCount = today
     ? members.filter((member) => {
         const days = getDaysRemaining(member.validUntil, today);
-        return days >= 0 && days <= 30;
+        return days !== null && days >= 0 && days <= 30;
       }).length
     : 0;
 
   const urgentCount = today
     ? members.filter((member) => {
         const days = getDaysRemaining(member.validUntil, today);
-        return days >= 0 && days <= 7;
+        return days !== null && days >= 0 && days <= 7;
       }).length
     : 0;
 
@@ -325,7 +371,7 @@ export default function ExpiringMembersPage() {
                 ) : (
                   expiringMembers.map((member) => {
                     const days = getDaysRemaining(member.validUntil, today!);
-                    const urgent = days <= 7;
+                    const urgent = days !== null && days <= 7;
 
                     return (
                       <tr
@@ -335,23 +381,24 @@ export default function ExpiringMembersPage() {
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#14E1E6]/10 font-semibold text-[#14E1E6]">
-                              {member.name.charAt(0).toUpperCase()}
+                              {(member.name || "M").charAt(0).toUpperCase()}
                             </div>
                             <div>
                               <p className="font-medium text-white">
                                 {member.name}
                               </p>
                               <p className="mt-1 text-xs text-gray-500">
-                                {member.email}
+                                {member.email || "No email"}
                               </p>
                               <p className="mt-1 text-xs text-gray-600">
-                                {member.membershipNumber}
+                                {member.membershipNumber ||
+                                  "No membership number"}
                               </p>
                             </div>
                           </div>
                         </td>
                         <td className="px-5 py-4 text-gray-400">
-                          {member.phone}
+                          {member.phone || "-"}
                         </td>
                         <td className="px-5 py-4 text-gray-300">
                           {formatDate(member.validUntil)}
@@ -379,15 +426,20 @@ export default function ExpiringMembersPage() {
                             >
                               <Eye size={16} />
                             </button>
-                            <a
-                              href={getWhatsAppLink(member.phone, member.name)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title="Contact via WhatsApp"
-                              className="rounded-lg border border-green-500/20 p-2 text-green-400 transition hover:bg-green-500/10"
-                            >
-                              <MessageCircle size={16} />
-                            </a>
+                            {member.phone && (
+                              <a
+                                href={getWhatsAppLink(
+                                  member.phone,
+                                  member.name,
+                                )}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Contact via WhatsApp"
+                                className="rounded-lg border border-green-500/20 p-2 text-green-400 transition hover:bg-green-500/10"
+                              >
+                                <MessageCircle size={16} />
+                              </a>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -418,18 +470,50 @@ export default function ExpiringMembersPage() {
                 </button>
               </div>
 
-              <div className="space-y-4">
+              <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
                 {[
                   ["Membership Number", selectedMember.membershipNumber || "-"],
-                  ["Name", selectedMember.name],
-                  ["Email", selectedMember.email],
-                  ["Phone", selectedMember.phone],
+                  ["Name", selectedMember.name || "-"],
+                  ["Email", selectedMember.email || "-"],
+                  ["Phone", selectedMember.phone || "-"],
                   ["Date of Birth", formatDate(selectedMember.dateOfBirth)],
                   ["Valid From", formatDate(selectedMember.validFrom)],
                   ["Valid Until", formatDate(selectedMember.validUntil)],
+                  ["Address", selectedMember.address || "-"],
+                  ["Gender", selectedMember.gender || "-"],
+                  ["Postal Code", selectedMember.postalCode || "-"],
+                  ["Nationality", selectedMember.nationality || "-"],
+                  ["Identity Number", selectedMember.identityNumber || "-"],
+                  ["Membership Status", selectedMember.membershipStatus || "-"],
+                  [
+                    "Marketing",
+                    selectedMember.marketing === null
+                      ? "-"
+                      : selectedMember.marketing
+                        ? "Yes"
+                        : "No",
+                  ],
+                  [
+                    "Created At",
+                    selectedMember.createdAt
+                      ? new Date(selectedMember.createdAt).toLocaleString(
+                          "id-ID",
+                        )
+                      : "-",
+                  ],
+                  [
+                    "Updated At",
+                    selectedMember.updatedAt
+                      ? new Date(selectedMember.updatedAt).toLocaleString(
+                          "id-ID",
+                        )
+                      : "-",
+                  ],
                   [
                     "Remaining",
-                    `${getDaysRemaining(selectedMember.validUntil, today)} days`,
+                    getDaysRemaining(selectedMember.validUntil, today) === null
+                      ? "No expiry date"
+                      : `${getDaysRemaining(selectedMember.validUntil, today)} days`,
                   ],
                 ].map(([label, value]) => (
                   <div
@@ -437,25 +521,27 @@ export default function ExpiringMembersPage() {
                     className="flex justify-between gap-4 border-b border-white/5 pb-3 text-sm"
                   >
                     <span className="text-gray-500">{label}</span>
-                    <span className="text-right font-medium text-white">
+                    <span className="max-w-[65%] break-words text-right font-medium text-white">
                       {value}
                     </span>
                   </div>
                 ))}
               </div>
 
-              <a
-                href={getWhatsAppLink(
-                  selectedMember.phone,
-                  selectedMember.name,
-                )}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-green-500 py-3 text-sm font-semibold text-white transition hover:bg-green-600"
-              >
-                <MessageCircle size={18} />
-                Contact via WhatsApp
-              </a>
+              {selectedMember.phone && (
+                <a
+                  href={getWhatsAppLink(
+                    selectedMember.phone,
+                    selectedMember.name,
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-green-500 py-3 text-sm font-semibold text-white transition hover:bg-green-600"
+                >
+                  <MessageCircle size={18} />
+                  Contact via WhatsApp
+                </a>
+              )}
             </div>
           </div>
         )}
